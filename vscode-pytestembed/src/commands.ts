@@ -8,7 +8,7 @@ import { state } from './state';
 import { startLiveTesting, stopLiveTesting, runIndividualTest } from './liveTesting';
 import { runTestAtCursor, showTestResultsPanel } from './testResults';
 import { startMcpServer, stopMcpServer } from './mcpServer';
-import { toggleBlockFolding } from './folding';
+import { toggleBlockFolding, foldFunctionWithBlocks } from './folding';
 import { openPyTestEmbedPanel } from './panel';
 import { BlockType } from './types';
 
@@ -291,6 +291,17 @@ export function registerCommands(context: vscode.ExtensionContext) {
             navigateToElement({file_path: 'test.py', line_number: 10});
         })
     );
+
+    // Smart folding command
+    context.subscriptions.push(
+        vscode.commands.registerCommand('pytestembed.foldFunctionWithBlocks', () => {
+            const editor = vscode.window.activeTextEditor;
+            if (editor) {
+                const lineNumber = editor.selection.active.line;
+                foldFunctionWithBlocks(lineNumber);
+            }
+        })
+    );
 }
 
 /**
@@ -404,16 +415,18 @@ async function toggleBlocksOfType(blockType: 'test' | 'doc', visible: boolean) {
  * Show all blocks
  */
 async function showAllBlocks() {
-    // REMOVED - Will be implemented in separate folding.ts file
-    vscode.window.showInformationMessage(`Folding logic temporarily disabled - being reimplemented`);
+    await toggleBlockFolding('test', false); // false = unfold
+    await toggleBlockFolding('doc', false);  // false = unfold
+    vscode.window.showInformationMessage('Showing all blocks');
 }
 
 /**
  * Hide all blocks
  */
 async function hideAllBlocks() {
-    // REMOVED - Will be implemented in separate folding.ts file
-    vscode.window.showInformationMessage(`Folding logic temporarily disabled - being reimplemented`);
+    await toggleBlockFolding('test', true);  // true = fold
+    await toggleBlockFolding('doc', true);   // true = fold
+    vscode.window.showInformationMessage('Hiding all blocks');
 }
 
 /**
