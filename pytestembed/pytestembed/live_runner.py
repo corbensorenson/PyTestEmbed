@@ -161,16 +161,37 @@ class LiveTestRunner:
                     await self.run_property_tests(file_path, function_name)
 
             elif command == 'get_dependencies':
+                element_id = data.get('element_id')
                 file_path = data.get('file_path')
+                element_name = data.get('element_name')
                 line_number = data.get('line_number')
-                if file_path and line_number:
-                    await self.send_dependencies(websocket, file_path, line_number)
+                if element_id or (file_path and element_name and line_number):
+                    await self.send_dependency_info(websocket, element_id, file_path, element_name, line_number)
 
             elif command == 'get_dependents':
+                element_id = data.get('element_id')
                 file_path = data.get('file_path')
+                element_name = data.get('element_name')
                 line_number = data.get('line_number')
-                if file_path and line_number:
-                    await self.send_dependents(websocket, file_path, line_number)
+                if element_id or (file_path and element_name):
+                    await self.send_dependents_info(websocket, element_id, file_path, element_name, line_number)
+
+            elif command == 'get_dependency_graph':
+                await self.send_full_dependency_graph(websocket)
+
+            elif command == 'find_dead_code':
+                file_path = data.get('file_path')
+                await self.send_dead_code_info(websocket, file_path)
+
+            elif command == 'analyze_impact':
+                file_path = data.get('file_path')
+                element_name = data.get('element_name')
+                change_type = data.get('change_type', 'modify')
+                if file_path and element_name:
+                    await self.send_impact_analysis(websocket, file_path, element_name, change_type)
+
+            elif command == 'get_failing_tests':
+                await self.send_failing_tests(websocket)
 
             elif command == 'export_dependency_graph':
                 output_path = data.get('output_path', 'dependency_graph.json')
@@ -293,6 +314,56 @@ class LiveTestRunner:
                 'error': str(e),
                 'timestamp': time.time()
             })
+
+    async def handle_file_change(self, changed_file: str):
+        """Handle file changes by updating dependency graph and running intelligent tests."""
+        print(f"📝 Handling file change: {changed_file}")
+
+        # Skip test running for certain files to avoid interference
+        skip_test_files = ['quick_test.py', 'simple_dependency_test.py', 'test_enhanced_tooltips.py']
+        if any(skip_file in changed_file for skip_file in skip_test_files):
+            print(f"⏭️ Skipping test execution for {changed_file}")
+            return
+
+        try:
+            # Update dependency graph for the changed file
+            print(f"🔗 Updating dependency graph for {changed_file}")
+            full_path = str(self.workspace_path / changed_file)
+
+            # Rebuild the dependency graph to reflect changes
+            # This is more efficient than rebuilding the entire graph
+            self.dependency_graph.update_file_dependencies(full_path)
+
+            # Broadcast dependency graph update to connected clients
+            await self.broadcast({
+                'type': 'dependency_graph_updated',
+                'data': {
+                    'changed_file': changed_file,
+                    'timestamp': time.time()
+                }
+            })
+
+            # Clear dependency cache for affected elements
+            await self.clear_dependency_cache_for_file(changed_file)
+
+            # Now run intelligent tests
+            await self.run_intelligent_tests(changed_file)
+
+        except Exception as e:
+            print(f"⚠️ Error handling file change: {e}")
+            # Fallback to just running tests
+            await self.run_intelligent_tests(changed_file)
+
+    async def clear_dependency_cache_for_file(self, file_path: str):
+        """Clear cached dependency information for elements in the changed file."""
+        # This will be used by VSCode extension to invalidate cached hover information
+        await self.broadcast({
+            'type': 'clear_dependency_cache',
+            'data': {
+                'file_path': file_path,
+                'timestamp': time.time()
+            }
+        })
 
     async def run_intelligent_tests(self, changed_file: str):
         """Run tests intelligently based on what changed in the file."""
@@ -926,6 +997,386 @@ except Exception as e:
             }
             await self.broadcast(response)
     
+    async def send_dependency_info(self, websocket, element_id: str, file_path: str, element_name: str, line_number: int):
+        """Send dependency information for a code element."""
+        print(f"🔍 Processing dependency info request for {element_name} in {file_path}")
+        try:
+            # Find the actual element in the dependency graph
+            actual_element_id = self._find_element_by_location(file_path, element_name, line_number)
+
+            if not actual_element_id:
+                # Element not found in dependency graph
+                print(f"❌ Element {element_name} not found in dependency graph")
+                dependency_info = {
+                    'type': 'dependency_info',
+                    'element_id': element_id or f"{file_path}:{element_name}:{line_number}",
+                    'element_name': element_name,
+                    'file_path': file_path,
+                    'line_number': line_number,
+                    'dependencies': [],
+                    'dependents': [],
+                    'enhanced_dependencies': [],
+                    'enhanced_dependents': [],
+                    'is_dead_code': True,
+                    'dependency_count': 0,
+                    'dependent_count': 0,
+                    'error': 'Element not found in dependency graph'
+                }
+                try:
+                    await websocket.send(json.dumps(dependency_info))
+                    print(f"✅ Sent 'not found' response for {element_name}")
+                except Exception as e:
+                    print(f"❌ Failed to send 'not found' response: {e}")
+                return
+
+            # Get dependencies and dependents from the dependency graph
+            dependencies = self.dependency_graph.get_dependencies(actual_element_id)
+            dependents = self.dependency_graph.get_dependents(actual_element_id)
+
+            # Check if this is dead code
+            is_dead_code = len(dependents) == 0 and element_name not in ['main', '__init__']
+
+            # Enhance dependencies with documentation (simplified for speed)
+            enhanced_dependencies = []
+            for dep_id in dependencies[:5]:  # Limit to first 5 for performance
+                if dep_id in self.dependency_graph.elements:
+                    dep_element = self.dependency_graph.elements[dep_id]
+                    enhanced_dependencies.append({
+                        'id': dep_id,
+                        'name': dep_element.name,
+                        'file_path': dep_element.file_path,
+                        'line_number': dep_element.line_number,
+                        'documentation': f"Documentation for {dep_element.name}",  # Simplified for now
+                        'element_type': dep_element.element_type
+                    })
+
+            # Enhance dependents with documentation (simplified for speed)
+            enhanced_dependents = []
+            for dep_id in dependents[:5]:  # Limit to first 5 for performance
+                if dep_id in self.dependency_graph.elements:
+                    dep_element = self.dependency_graph.elements[dep_id]
+                    enhanced_dependents.append({
+                        'id': dep_id,
+                        'name': dep_element.name,
+                        'file_path': dep_element.file_path,
+                        'line_number': dep_element.line_number,
+                        'documentation': f"Documentation for {dep_element.name}",  # Simplified for now
+                        'element_type': dep_element.element_type
+                    })
+
+            # Format dependency information for hover display
+            dependency_info = {
+                'type': 'dependency_info',
+                'element_id': element_id or actual_element_id,
+                'element_name': element_name,
+                'file_path': file_path,
+                'line_number': line_number,
+                'dependencies': dependencies,  # Keep original format for compatibility
+                'dependents': dependents,      # Keep original format for compatibility
+                'enhanced_dependencies': enhanced_dependencies,  # New enhanced format
+                'enhanced_dependents': enhanced_dependents,      # New enhanced format
+                'is_dead_code': is_dead_code,
+                'dependency_count': len(dependencies),
+                'dependent_count': len(dependents)
+            }
+
+            print(f"📤 Sending dependency info for {element_name}...")
+            await websocket.send(json.dumps(dependency_info))
+            print(f"✅ Successfully sent dependency info for {element_name} ({actual_element_id}): {len(dependencies)} deps, {len(dependents)} dependents")
+
+        except Exception as e:
+            print(f"⚠️ Error sending dependency info: {e}")
+            import traceback
+            print(f"⚠️ Full traceback: {traceback.format_exc()}")
+            error_response = {
+                'type': 'dependency_error',
+                'element_id': element_id or f"{file_path}:{element_name}:{line_number}",
+                'error': str(e)
+            }
+            try:
+                await websocket.send(json.dumps(error_response))
+            except Exception as send_error:
+                print(f"⚠️ Error sending error response: {send_error}")
+
+    def _find_element_by_location(self, file_path: str, element_name: str, line_number: int) -> str:
+        """Find the actual element ID in the dependency graph by file, name, and line."""
+        # Try exact matches first
+        candidates = []
+
+        for element_id, element in self.dependency_graph.elements.items():
+            if (element.file_path == file_path and
+                element.name == element_name and
+                element.line_number == line_number):
+                return element_id
+
+        # If no exact match, try by file and name (line numbers might be slightly off)
+        for element_id, element in self.dependency_graph.elements.items():
+            if (element.file_path == file_path and
+                element.name == element_name):
+                candidates.append((element_id, abs(element.line_number - line_number)))
+
+        # Return the closest match by line number
+        if candidates:
+            candidates.sort(key=lambda x: x[1])  # Sort by line number difference
+            return candidates[0][0]
+
+        return None
+
+    def _extract_element_documentation(self, file_path: str, element_name: str, line_number: int) -> str:
+        """Extract documentation from PyTestEmbed doc: blocks for an element."""
+        try:
+            # Quick check - if file doesn't exist, return empty
+            if not os.path.exists(file_path):
+                return ""
+
+            # For now, return a simple placeholder to avoid processing delays
+            # TODO: Implement efficient documentation extraction
+            return f"Documentation for {element_name}"
+
+        except Exception as e:
+            print(f"⚠️ Error extracting documentation for {element_name}: {e}")
+            return ""
+
+    async def send_dependents_info(self, websocket, element_id: str, file_path: str, element_name: str, line_number: int):
+        """Send information about what depends on a code element."""
+        try:
+            # Find the actual element in the dependency graph
+            actual_element_id = self._find_element_by_location(file_path, element_name, line_number)
+
+            if not actual_element_id:
+                dependency_info = {
+                    'type': 'dependents_info',
+                    'element_id': element_id or f"{file_path}:{element_name}:{line_number}",
+                    'element_name': element_name,
+                    'file_path': file_path,
+                    'line_number': line_number,
+                    'dependents': [],
+                    'dependent_count': 0
+                }
+                await websocket.send(json.dumps(dependency_info))
+                return
+
+            # Get dependents from the dependency graph
+            dependents = self.dependency_graph.get_dependents(actual_element_id)
+
+            # Format dependency information
+            dependency_info = {
+                'type': 'dependents_info',
+                'element_id': element_id or actual_element_id,
+                'element_name': element_name,
+                'file_path': file_path,
+                'line_number': line_number,
+                'dependents': dependents,
+                'dependent_count': len(dependents)
+            }
+
+            await websocket.send(json.dumps(dependency_info))
+            print(f"📊 Sent dependents info for {element_name} ({actual_element_id}): {len(dependents)} dependents")
+
+        except Exception as e:
+            print(f"⚠️ Error sending dependents info: {e}")
+            error_response = {
+                'type': 'dependents_error',
+                'element_id': element_id or f"{file_path}:{element_name}:{line_number}",
+                'error': str(e)
+            }
+            await websocket.send(json.dumps(error_response))
+
+    async def send_full_dependency_graph(self, websocket):
+        """Send the complete dependency graph."""
+        try:
+            # Get graph statistics
+            total_elements = len(self.dependency_graph.elements)
+            total_dependencies = len(self.dependency_graph.edges)
+
+            # Find dead code
+            dead_code_elements = []
+            for element_id, element in self.dependency_graph.elements.items():
+                dependents = self.dependency_graph.get_dependents(element_id)
+                if len(dependents) == 0 and element.name not in ['main', '__init__']:
+                    dead_code_elements.append({
+                        'element_id': element_id,
+                        'name': element.name,
+                        'file_path': element.file_path,
+                        'line_number': element.line_number,
+                        'element_type': element.element_type
+                    })
+
+            graph_info = {
+                'type': 'dependency_graph',
+                'statistics': {
+                    'total_elements': total_elements,
+                    'total_dependencies': total_dependencies,
+                    'dead_code_count': len(dead_code_elements)
+                },
+                'elements': {element_id: {
+                    'name': element.name,
+                    'file_path': element.file_path,
+                    'line_number': element.line_number,
+                    'element_type': element.element_type,
+                    'parent_class': element.parent_class
+                } for element_id, element in self.dependency_graph.elements.items()},
+                'edges': [{'from': edge.from_element, 'to': edge.to_element, 'type': edge.edge_type} for edge in self.dependency_graph.edges],
+                'dead_code': dead_code_elements
+            }
+
+            await websocket.send(json.dumps(graph_info))
+            print(f"📊 Sent complete dependency graph: {total_elements} elements, {total_dependencies} dependencies")
+
+        except Exception as e:
+            print(f"⚠️ Error sending dependency graph: {e}")
+            error_response = {
+                'type': 'dependency_graph_error',
+                'error': str(e)
+            }
+            await websocket.send(json.dumps(error_response))
+
+    async def send_dead_code_info(self, websocket, file_path: str = None):
+        """Send dead code detection results."""
+        try:
+            dead_code_elements = []
+
+            # Check all elements or just elements in a specific file
+            for element_id, element in self.dependency_graph.elements.items():
+                if file_path and element.file_path != file_path:
+                    continue
+
+                dependents = self.dependency_graph.get_dependents(element_id)
+                if len(dependents) == 0 and element.name not in ['main', '__init__']:
+                    dead_code_elements.append({
+                        'element_id': element_id,
+                        'name': element.name,
+                        'file_path': element.file_path,
+                        'line_number': element.line_number,
+                        'element_type': element.element_type,
+                        'parent_class': element.parent_class
+                    })
+
+            dead_code_info = {
+                'type': 'dead_code_info',
+                'file_path': file_path,
+                'dead_code_elements': dead_code_elements,
+                'total_dead_code': len(dead_code_elements)
+            }
+
+            await websocket.send(json.dumps(dead_code_info))
+            print(f"📊 Sent dead code info: {len(dead_code_elements)} dead code elements")
+
+        except Exception as e:
+            print(f"⚠️ Error sending dead code info: {e}")
+            error_response = {
+                'type': 'dead_code_error',
+                'file_path': file_path,
+                'error': str(e)
+            }
+            await websocket.send(json.dumps(error_response))
+
+    async def send_impact_analysis(self, websocket, file_path: str, element_name: str, change_type: str):
+        """Send impact analysis for a code element change."""
+        try:
+            # Find the element
+            actual_element_id = self._find_element_by_location(file_path, element_name, None)
+
+            if not actual_element_id:
+                impact_info = {
+                    'type': 'impact_analysis',
+                    'file_path': file_path,
+                    'element_name': element_name,
+                    'change_type': change_type,
+                    'affected_elements': [],
+                    'affected_tests': [],
+                    'risk_level': 'unknown'
+                }
+                await websocket.send(json.dumps(impact_info))
+                return
+
+            # Get dependents (what would be affected)
+            dependents = self.dependency_graph.get_dependents(actual_element_id)
+
+            # Analyze risk level
+            risk_level = 'low'
+            if len(dependents) > 10:
+                risk_level = 'high'
+            elif len(dependents) > 3:
+                risk_level = 'medium'
+
+            # Find affected test files
+            affected_tests = []
+            for dependent_id in dependents:
+                if dependent_id in self.dependency_graph.elements:
+                    dep_element = self.dependency_graph.elements[dependent_id]
+                    if 'test' in dep_element.file_path.lower() or 'test' in dep_element.name.lower():
+                        affected_tests.append({
+                            'file_path': dep_element.file_path,
+                            'element_name': dep_element.name,
+                            'line_number': dep_element.line_number
+                        })
+
+            impact_info = {
+                'type': 'impact_analysis',
+                'file_path': file_path,
+                'element_name': element_name,
+                'change_type': change_type,
+                'affected_elements': dependents,
+                'affected_tests': affected_tests,
+                'risk_level': risk_level,
+                'recommendations': [
+                    f"Review {len(dependents)} dependent elements",
+                    f"Run {len(affected_tests)} affected tests",
+                    "Consider updating documentation"
+                ]
+            }
+
+            await websocket.send(json.dumps(impact_info))
+            print(f"📊 Sent impact analysis for {element_name}: {len(dependents)} affected elements")
+
+        except Exception as e:
+            print(f"⚠️ Error sending impact analysis: {e}")
+            error_response = {
+                'type': 'impact_analysis_error',
+                'file_path': file_path,
+                'element_name': element_name,
+                'error': str(e)
+            }
+            await websocket.send(json.dumps(error_response))
+
+    async def send_failing_tests(self, websocket):
+        """Send list of currently failing tests."""
+        try:
+            failing_tests = []
+
+            # Collect failing tests from all file results
+            for file_path, results in self.file_results.items():
+                for test in results.tests:
+                    if test.status in ['fail', 'error']:
+                        failing_tests.append({
+                            'test_name': test.test_name,
+                            'file_path': test.file_path,
+                            'line_number': test.line_number,
+                            'status': test.status,
+                            'message': test.message,
+                            'assertion': test.assertion,
+                            'duration': test.duration
+                        })
+
+            failing_tests_info = {
+                'type': 'failing_tests',
+                'failing_tests': failing_tests,
+                'total_failures': len(failing_tests),
+                'last_updated': time.time()
+            }
+
+            await websocket.send(json.dumps(failing_tests_info))
+            print(f"📊 Sent failing tests info: {len(failing_tests)} failing tests")
+
+        except Exception as e:
+            print(f"⚠️ Error sending failing tests: {e}")
+            error_response = {
+                'type': 'failing_tests_error',
+                'error': str(e)
+            }
+            await websocket.send(json.dumps(error_response))
+
     async def send_coverage(self, websocket, file_path: str):
         """Send coverage information for a file."""
         if file_path in self.file_results:
@@ -1606,10 +2057,10 @@ except Exception as e:
                         relative_path = str(src_path.relative_to(workspace_path))
                         print(f"📝 File changed: {relative_path}")
 
-                        # Schedule intelligent test running
+                        # Schedule dependency graph update and intelligent test running
                         if hasattr(self.live_runner, '_loop') and self.live_runner._loop:
                             self.live_runner._loop.call_soon_threadsafe(
-                                lambda: asyncio.create_task(self.live_runner.run_intelligent_tests(relative_path))
+                                lambda: asyncio.create_task(self.live_runner.handle_file_change(relative_path))
                             )
                 except (ValueError, OSError) as e:
                     print(f"Error processing file change for {event.src_path}: {e}")
@@ -1690,6 +2141,58 @@ class LiveTestClient:
             await self.websocket.send(json.dumps({
                 'command': 'get_coverage',
                 'file_path': file_path
+            }))
+
+    async def get_dependencies(self, file_path: str, element_name: str, line_number: int = None):
+        """Request dependency information for a code element."""
+        if self.websocket:
+            await self.websocket.send(json.dumps({
+                'command': 'get_dependencies',
+                'file_path': file_path,
+                'element_name': element_name,
+                'line_number': line_number
+            }))
+
+    async def get_dependents(self, file_path: str, element_name: str, line_number: int = None):
+        """Request dependent information for a code element."""
+        if self.websocket:
+            await self.websocket.send(json.dumps({
+                'command': 'get_dependents',
+                'file_path': file_path,
+                'element_name': element_name,
+                'line_number': line_number
+            }))
+
+    async def get_dependency_graph(self):
+        """Request the complete dependency graph."""
+        if self.websocket:
+            await self.websocket.send(json.dumps({
+                'command': 'get_dependency_graph'
+            }))
+
+    async def find_dead_code(self, file_path: str = None):
+        """Request dead code detection."""
+        if self.websocket:
+            await self.websocket.send(json.dumps({
+                'command': 'find_dead_code',
+                'file_path': file_path
+            }))
+
+    async def analyze_impact(self, file_path: str, element_name: str, change_type: str = "modify"):
+        """Request impact analysis for a code element."""
+        if self.websocket:
+            await self.websocket.send(json.dumps({
+                'command': 'analyze_impact',
+                'file_path': file_path,
+                'element_name': element_name,
+                'change_type': change_type
+            }))
+
+    async def get_failing_tests(self):
+        """Request list of currently failing tests."""
+        if self.websocket:
+            await self.websocket.send(json.dumps({
+                'command': 'get_failing_tests'
             }))
     
     def on_test_results(self, callback: Callable):

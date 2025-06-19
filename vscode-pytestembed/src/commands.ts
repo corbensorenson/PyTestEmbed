@@ -212,6 +212,41 @@ export function registerCommands(context: vscode.ExtensionContext) {
             configurePyTestEmbedLinter();
         })
     );
+
+    // Navigation commands
+    context.subscriptions.push(
+        vscode.commands.registerCommand('pytestembed.navigateToDefinition', (args: string) => {
+            navigateToDefinition(args);
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('pytestembed.navigateToElement', (...args: any[]) => {
+            console.log('🔗 Command called with args:', args);
+            // Handle both direct calls and URI-based calls
+            if (args.length === 1 && typeof args[0] === 'string') {
+                // URI-based call - parse the JSON string
+                try {
+                    const parsed = JSON.parse(decodeURIComponent(args[0]));
+                    navigateToElement(parsed);
+                } catch (error) {
+                    console.log('❌ Failed to parse URI args:', error);
+                    navigateToElement(args[0]);
+                }
+            } else {
+                // Direct call
+                navigateToElement(args[0]);
+            }
+        })
+    );
+
+    // Test command for debugging navigation
+    context.subscriptions.push(
+        vscode.commands.registerCommand('pytestembed.testNavigation', () => {
+            console.log('🧪 Testing navigation...');
+            navigateToElement({file_path: 'test.py', line_number: 10});
+        })
+    );
 }
 
 /**
@@ -449,6 +484,113 @@ function foldBlocksOfType(blockType: 'test' | 'doc') {
  */
 function configurePyTestEmbedLinter() {
     vscode.window.showInformationMessage('Linter configuration feature coming soon!');
+}
+
+/**
+ * Navigate to a definition based on dependency information
+ */
+async function navigateToDefinition(args: string) {
+    try {
+        const { file, name } = JSON.parse(args);
+
+        // Find the workspace folder
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+        if (!workspaceFolder) {
+            vscode.window.showErrorMessage('No workspace folder found');
+            return;
+        }
+
+        // Construct the full file path
+        const fullPath = path.join(workspaceFolder.uri.fsPath, file);
+        const fileUri = vscode.Uri.file(fullPath);
+
+        try {
+            // Open the file and navigate to the definition
+            const document = await vscode.workspace.openTextDocument(fileUri);
+            const editor = await vscode.window.showTextDocument(document);
+
+            // Search for the definition in the file
+            const text = document.getText();
+            const lines = text.split('\n');
+
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                const trimmed = line.trim();
+
+                // Look for function or class definitions
+                if ((trimmed.startsWith(`def ${name}(`) ||
+                     trimmed.startsWith(`class ${name}(`)) &&
+                    trimmed.endsWith(':')) {
+
+                    const position = new vscode.Position(i, line.indexOf(name));
+                    editor.selection = new vscode.Selection(position, position);
+                    editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
+                    return;
+                }
+            }
+
+            // If not found, just show the file
+            vscode.window.showInformationMessage(`Definition of '${name}' not found in ${file}`);
+        } catch (error) {
+            vscode.window.showErrorMessage(`Could not open file: ${file}`);
+        }
+    } catch (error) {
+        vscode.window.showErrorMessage('Invalid navigation arguments');
+    }
+}
+
+/**
+ * Navigate to a specific element (for hover provider)
+ */
+async function navigateToElement(args: any) {
+    try {
+        console.log('🔗 navigateToElement called with args:', args, 'type:', typeof args);
+
+        // Handle different argument formats
+        let file_path: string, line_number: number;
+
+        if (Array.isArray(args) && args.length > 0) {
+            // Array format: [{file_path: "...", line_number: 123}]
+            ({ file_path, line_number } = args[0]);
+        } else if (args && typeof args === 'object' && args.file_path) {
+            // Object format: {file_path: "...", line_number: 123}
+            ({ file_path, line_number } = args);
+        } else {
+            console.log('❌ Invalid arguments format');
+            vscode.window.showErrorMessage('Invalid navigation arguments format');
+            return;
+        }
+
+        console.log(`🔗 Parsed: file_path=${file_path}, line_number=${line_number}`);
+
+        // Find the workspace folder
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+        if (!workspaceFolder) {
+            vscode.window.showErrorMessage('No workspace folder found');
+            return;
+        }
+
+        // Construct the full file path
+        const fullPath = path.join(workspaceFolder.uri.fsPath, file_path);
+        const fileUri = vscode.Uri.file(fullPath);
+
+        try {
+            // Open the file and navigate to the line
+            const document = await vscode.workspace.openTextDocument(fileUri);
+            const editor = await vscode.window.showTextDocument(document);
+
+            // Navigate to the specific line
+            const position = new vscode.Position(line_number - 1, 0); // Convert to 0-based
+            editor.selection = new vscode.Selection(position, position);
+            editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
+
+        } catch (error) {
+            vscode.window.showErrorMessage(`Could not open file: ${file_path}`);
+        }
+
+    } catch (error) {
+        vscode.window.showErrorMessage('Invalid navigation arguments');
+    }
 }
 
 /**

@@ -77,38 +77,14 @@ export function refreshTestResultDecorations(filePath: string) {
 
     const fileResults = getTestResults(filePath);
 
-    const passRanges: vscode.DecorationOptions[] = [];
-    const failRanges: vscode.DecorationOptions[] = [];
-    const runningRanges: vscode.DecorationOptions[] = [];
-    const errorRanges: vscode.DecorationOptions[] = [];
+    // Clear individual test decorations - we only want block-level decorations
+    editor.setDecorations(decorationTypes.passIconDecorationType, []);
+    editor.setDecorations(decorationTypes.failIconDecorationType, []);
+    editor.setDecorations(decorationTypes.runningIconDecorationType, []);
+    editor.setDecorations(decorationTypes.errorIconDecorationType, []);
 
-    fileResults.forEach(result => {
-        const range = new vscode.Range(result.line, 0, result.line, 0);
-        const decorationOptions: vscode.DecorationOptions = {
-            range,
-            hoverMessage: result.message || `${result.status}: ${result.expression}`
-        };
-
-        switch (result.status) {
-            case 'pass':
-                passRanges.push(decorationOptions);
-                break;
-            case 'fail':
-                failRanges.push(decorationOptions);
-                break;
-            case 'running':
-                runningRanges.push(decorationOptions);
-                break;
-            case 'error':
-                errorRanges.push(decorationOptions);
-                break;
-        }
-    });
-
-    editor.setDecorations(decorationTypes.passIconDecorationType, passRanges);
-    editor.setDecorations(decorationTypes.failIconDecorationType, failRanges);
-    editor.setDecorations(decorationTypes.runningIconDecorationType, runningRanges);
-    editor.setDecorations(decorationTypes.errorIconDecorationType, errorRanges);
+    // Update collapsed block status indicators instead
+    updateCollapsedBlockStatusIndicators(editor, fileResults);
 }
 
 /**
@@ -127,50 +103,44 @@ export function updateCollapsedBlockStatusIndicators(editor: vscode.TextEditor, 
     for (let i = 0; i < document.lineCount; i++) {
         const line = document.lineAt(i);
         if (line.text.trim() === 'test:') {
-            // Always show status for test: blocks (whether collapsed or not)
-            // When collapsed, show aggregate status; when expanded, individual tests show their own status
-            const isCollapsed = isTestBlockCollapsed(editor, i);
+            // Always show status for test: blocks
+            // Find all tests in this block
+            const blockTests = findTestsInBlock(document, i, fileResults);
 
-            // Show block status indicator for test: blocks
-            {
-                // Find all tests in this block
-                const blockTests = findTestsInBlock(document, i, fileResults);
+            if (blockTests.length === 0) {
+                // No tests run yet - show as fail (untested)
+                const range = new vscode.Range(i, 0, i, 0);
+                const decorationOptions: vscode.DecorationOptions = {
+                    range,
+                    hoverMessage: 'Tests not run yet'
+                };
+                testBlockStatusRanges.fail.push(decorationOptions);
+            } else {
+                // Determine block status based on tests
+                const hasFailures = blockTests.some(t => t.status === 'fail' || t.status === 'error');
+                const hasRunning = blockTests.some(t => t.status === 'running');
 
-                if (blockTests.length === 0) {
-                    // No tests run yet - show as fail (untested)
-                    const range = new vscode.Range(i, 0, i, 0);
-                    const decorationOptions: vscode.DecorationOptions = {
-                        range,
-                        hoverMessage: 'Tests not run yet'
-                    };
-                    testBlockStatusRanges.fail.push(decorationOptions);
+                const range = new vscode.Range(i, 0, i, 0);
+                let status: string;
+                let hoverMessage: string;
+
+                if (hasRunning) {
+                    status = 'running';
+                    hoverMessage = 'Tests running...';
+                } else if (hasFailures) {
+                    status = 'fail';
+                    const failCount = blockTests.filter(t => t.status === 'fail' || t.status === 'error').length;
+                    hoverMessage = `${failCount} test(s) failing`;
                 } else {
-                    // Determine block status based on tests
-                    const hasFailures = blockTests.some(t => t.status === 'fail' || t.status === 'error');
-                    const hasRunning = blockTests.some(t => t.status === 'running');
-
-                    const range = new vscode.Range(i, 0, i, 0);
-                    let status: string;
-                    let hoverMessage: string;
-
-                    if (hasRunning) {
-                        status = 'running';
-                        hoverMessage = 'Tests running...';
-                    } else if (hasFailures) {
-                        status = 'fail';
-                        const failCount = blockTests.filter(t => t.status === 'fail' || t.status === 'error').length;
-                        hoverMessage = `${failCount} test(s) failing`;
-                    } else {
-                        status = 'pass';
-                        hoverMessage = `All ${blockTests.length} tests passing`;
-                    }
-
-                    const decorationOptions: vscode.DecorationOptions = {
-                        range,
-                        hoverMessage
-                    };
-                    testBlockStatusRanges[status].push(decorationOptions);
+                    status = 'pass';
+                    hoverMessage = `All ${blockTests.length} tests passing`;
                 }
+
+                const decorationOptions: vscode.DecorationOptions = {
+                    range,
+                    hoverMessage
+                };
+                testBlockStatusRanges[status].push(decorationOptions);
             }
         }
     }

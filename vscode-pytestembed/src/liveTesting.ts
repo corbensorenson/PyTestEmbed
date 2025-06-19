@@ -8,54 +8,130 @@ import * as path from 'path';
 import * as WebSocket from 'ws';
 import { state, addPanelMessage, updateTestProgress, setTestResults } from './state';
 import { refreshTestResultDecorations, updateCollapsedBlockStatusIndicators } from './decorations';
-import { TestResult, LiveTestMessage } from './types';
+import { TestResult, LiveTestMessage, DependencyInfo } from './types';
 import { updateTestStatus, markAllTestsAsFailing, markAllTestsAsUntested, markAllTestsAsRunning } from './testResults';
 
 /**
  * Start live testing server and connect to it
  */
-export function startLiveTesting() {
-    if (state.liveTestingEnabled) {
-        vscode.window.showInformationMessage('Live testing is already running');
-        return;
-    }
-
+export async function startLiveTesting() {
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
     if (!workspaceFolder) {
         vscode.window.showErrorMessage('No workspace folder found');
         return;
     }
 
-    state.outputChannel.appendLine('🚀 Starting PyTestEmbed Live Testing...');
+    state.outputChannel.appendLine('🔍 Checking server status...');
 
-    // Get Python interpreter from configuration
+    // First, try to connect to existing servers
+    const liveTestConnected = await checkServerConnection('ws://localhost:8768', 'Live Test Server');
+    const dependencyConnected = await checkServerConnection('ws://localhost:8770', 'Dependency Service');
+
+    if (liveTestConnected && dependencyConnected) {
+        state.outputChannel.appendLine('✅ Both servers already running, connecting...');
+        connectToLiveTestServer();
+        return;
+    }
+
+    // Start missing servers
+    state.outputChannel.appendLine('🚀 Starting PyTestEmbed services...');
+
     const config = vscode.workspace.getConfiguration('pytestembed');
     const pythonInterpreter = config.get('pythonInterpreter', 'python');
 
-    // Start the live test server
-    state.liveTestProcess = cp.spawn(pythonInterpreter, ['-m', 'pytestembed.live_runner', workspaceFolder.uri.fsPath], {
-        cwd: workspaceFolder.uri.fsPath,
-        shell: true
-    });
+    // Start live test server if not running
+    if (!liveTestConnected) {
+        state.outputChannel.appendLine('🚀 Starting Live Test Server...');
+        startLiveTestServer(pythonInterpreter, workspaceFolder.uri.fsPath);
+    }
 
-    state.liveTestProcess.stdout?.on('data', (data) => {
-        state.outputChannel.append(data.toString());
-    });
+    // Start dependency service if not running
+    if (!dependencyConnected) {
+        state.outputChannel.appendLine('🚀 Starting Dependency Service...');
+        startDependencyService(pythonInterpreter, workspaceFolder.uri.fsPath);
+    }
 
-    state.liveTestProcess.stderr?.on('data', (data) => {
-        state.outputChannel.append(data.toString());
-    });
-
-    state.liveTestProcess.on('close', (code) => {
-        state.outputChannel.appendLine(`Live test server exited with code ${code}`);
-        state.liveTestingEnabled = false;
-        updateLiveTestingStatus();
-    });
-
-    // Wait a moment for server to start, then connect
+    // Wait for servers to start, then connect
     setTimeout(() => {
         connectToLiveTestServer();
-    }, 2000);
+    }, 3000);
+}
+
+/**
+ * Check if a server is running by attempting to connect
+ */
+async function checkServerConnection(url: string, serverName: string): Promise<boolean> {
+    return new Promise((resolve) => {
+        try {
+            const ws = new WebSocket(url);
+
+            const timeout = setTimeout(() => {
+                ws.close();
+                resolve(false);
+            }, 1000);
+
+            ws.on('open', () => {
+                clearTimeout(timeout);
+                ws.close();
+                state.outputChannel.appendLine(`✅ ${serverName} is already running`);
+                resolve(true);
+            });
+
+            ws.on('error', () => {
+                clearTimeout(timeout);
+                state.outputChannel.appendLine(`❌ ${serverName} is not running`);
+                resolve(false);
+            });
+        } catch (error) {
+            resolve(false);
+        }
+    });
+}
+
+/**
+ * Start the live test server process
+ */
+function startLiveTestServer(pythonInterpreter: string, workspacePath: string) {
+    const liveTestProcess = cp.spawn(pythonInterpreter, ['-m', 'pytestembed.live_runner', workspacePath, '8768'], {
+        cwd: workspacePath,
+        shell: true,
+        detached: true
+    });
+
+    liveTestProcess.stdout?.on('data', (data) => {
+        state.outputChannel.append(`[Live Test] ${data.toString()}`);
+    });
+
+    liveTestProcess.stderr?.on('data', (data) => {
+        state.outputChannel.append(`[Live Test Error] ${data.toString()}`);
+    });
+
+    liveTestProcess.on('close', (code) => {
+        state.outputChannel.appendLine(`Live test server exited with code ${code}`);
+    });
+}
+
+/**
+ * Start the dependency service process
+ */
+function startDependencyService(pythonInterpreter: string, workspacePath: string) {
+    const dependencyProcess = cp.spawn(pythonInterpreter, ['-m', 'pytestembed.dependency_service', workspacePath, '8770'], {
+        cwd: workspacePath,
+        shell: true,
+        detached: true
+    });
+
+    dependencyProcess.stdout?.on('data', (data) => {
+        state.outputChannel.append(`[Dependency] ${data.toString()}`);
+    });
+
+    dependencyProcess.stderr?.on('data', (data) => {
+        state.outputChannel.append(`[Dependency Error] ${data.toString()}`);
+    });
+
+    dependencyProcess.on('close', (code) => {
+        state.outputChannel.appendLine(`Dependency service exited with code ${code}`);
+    });
 }
 
 /**
@@ -97,13 +173,14 @@ export function stopLiveTesting() {
  */
 function connectToLiveTestServer() {
     try {
-        state.liveTestSocket = new WebSocket('ws://localhost:8765');
+        state.liveTestSocket = new WebSocket('ws://localhost:8768');
 
         state.liveTestSocket.on('open', () => {
             state.outputChannel.appendLine('✅ Connected to live test server');
             state.liveTestingEnabled = true;
             updateLiveTestingStatus();
-            addPanelMessage('Connected to live test server', 'success');
+            addPanelMessage('✅ Live Test Server: Connected', 'success');
+            vscode.window.showInformationMessage('✅ Live testing connected successfully');
 
             // Mark all tests in currently open Python files as failing initially
             vscode.window.visibleTextEditors.forEach(editor => {
@@ -137,12 +214,15 @@ function connectToLiveTestServer() {
             state.outputChannel.appendLine('📡 Disconnected from live test server');
             state.liveTestingEnabled = false;
             updateLiveTestingStatus();
-            addPanelMessage('Disconnected from live test server', 'warning');
+            addPanelMessage('❌ Live Test Server: Disconnected', 'warning');
         });
 
         state.liveTestSocket.on('error', (error: Error) => {
             state.outputChannel.appendLine(`❌ Live test connection error: ${error.message}`);
-            vscode.window.showErrorMessage(`Failed to connect to live test server: ${error.message}`);
+            state.liveTestingEnabled = false;
+            updateLiveTestingStatus();
+            addPanelMessage(`❌ Live Test Server: Connection failed - ${error.message}`, 'error');
+            vscode.window.showErrorMessage(`❌ Failed to connect to live test server: ${error.message}`);
         });
 
     } catch (error) {
@@ -199,6 +279,21 @@ function handleLiveTestMessage(message: string) {
                 handleTestStatusUpdate(data);
                 addPanelMessage(`Test status: ${data.data.test_name} - ${data.data.status}`,
                     data.data.status === 'pass' ? 'success' : 'warning');
+                break;
+            case 'dependency_info':
+                handleDependencyInfo(data);
+                addPanelMessage(`Dependency info: ${(data as any).element_name} - ${(data as any).dependency_count} deps, ${(data as any).dependent_count} dependents`, 'info');
+                break;
+            case 'dependency_error':
+                addPanelMessage(`Dependency error: ${(data as any).error}`, 'error');
+                break;
+            case 'dependency_graph_updated':
+                handleDependencyGraphUpdate(data);
+                addPanelMessage(`Dependency graph updated for: ${(data as any).data?.changed_file}`, 'info');
+                break;
+            case 'clear_dependency_cache':
+                handleClearDependencyCache(data);
+                addPanelMessage(`Dependency cache cleared for: ${(data as any).data?.file_path}`, 'info');
                 break;
             default:
                 addPanelMessage(`Unknown message type: ${data.type}`, 'warning');
@@ -360,6 +455,63 @@ function handleTestStatusUpdate(data: LiveTestMessage) {
 
     // Update test status in VSCode
     updateTestStatus(absolutePath, lineNumber, status, expression, message);
+}
+
+/**
+ * Handle dependency information from server
+ */
+function handleDependencyInfo(data: any) {
+    const dependencyInfo: DependencyInfo = {
+        element_id: data.element_id,
+        element_name: data.element_name,
+        file_path: data.file_path,
+        line_number: data.line_number,
+        dependencies: data.dependencies || [],
+        dependents: data.dependents || [],
+        is_dead_code: data.is_dead_code || false,
+        dependency_count: data.dependency_count || 0,
+        dependent_count: data.dependent_count || 0
+    };
+
+    // Cache the dependency information
+    state.dependencyCache.set(data.element_id, dependencyInfo);
+
+    console.log(`🔗 Cached dependency info for ${data.element_name}: ${data.dependency_count} deps, ${data.dependent_count} dependents`);
+}
+
+/**
+ * Handle dependency graph update notification
+ */
+function handleDependencyGraphUpdate(data: any) {
+    const updateData = data.data;
+    console.log(`🔄 Dependency graph updated for file: ${updateData.changed_file}`);
+
+    // The dependency graph has been updated on the server side
+    // Any new hover requests will get fresh data
+}
+
+/**
+ * Handle dependency cache clearing for a file
+ */
+function handleClearDependencyCache(data: any) {
+    const clearData = data.data;
+    const filePath = clearData.file_path;
+
+    console.log(`🗑️ Clearing dependency cache for file: ${filePath}`);
+
+    // Remove all cached dependency info for elements in this file
+    const keysToRemove: string[] = [];
+    for (const [elementId, _] of state.dependencyCache) {
+        if (elementId.startsWith(filePath + ':')) {
+            keysToRemove.push(elementId);
+        }
+    }
+
+    for (const key of keysToRemove) {
+        state.dependencyCache.delete(key);
+    }
+
+    console.log(`🗑️ Removed ${keysToRemove.length} cached dependency entries for ${filePath}`);
 }
 
 /**

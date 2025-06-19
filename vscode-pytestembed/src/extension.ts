@@ -5,6 +5,7 @@ import { initializeTestResultDecorations, disposeTestResultDecorations, refreshT
 import { registerCommands } from './commands';
 import { markAllTestsAsFailing, markAllTestsAsUntested, markAllTestsAsRunning } from './testResults';
 import { stopMcpServer } from './mcpServer';
+import { registerHoverProvider } from './hoverProvider';
 import { createServerStatusIndicators } from './statusBar';
 import { registerProviders } from './providers';
 
@@ -29,6 +30,9 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Register providers
     registerProviders(context);
+
+    // Register hover provider for dependency tooltips
+    registerHoverProvider(context);
 
     // Register all commands
     registerCommands(context);

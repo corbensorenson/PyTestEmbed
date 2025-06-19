@@ -47,6 +47,24 @@ export function registerProviders(context: vscode.ExtensionContext) {
             }
         )
     );
+
+    // Register Hover provider for dependency information
+    const hoverProvider = new PyTestEmbedHoverProvider();
+    context.subscriptions.push(
+        vscode.languages.registerHoverProvider(
+            { scheme: 'file', language: 'python' },
+            hoverProvider
+        )
+    );
+
+    // Register Definition provider for navigation
+    const definitionProvider = new PyTestEmbedDefinitionProvider();
+    context.subscriptions.push(
+        vscode.languages.registerDefinitionProvider(
+            { scheme: 'file', language: 'python' },
+            definitionProvider
+        )
+    );
 }
 
 /**
@@ -114,15 +132,11 @@ class PyTestEmbedFoldingProvider implements vscode.FoldingRangeProvider {
 class StatusBarManager {
     private testToggleItem: vscode.StatusBarItem;
     private docToggleItem: vscode.StatusBarItem;
-    private runTestsItem: vscode.StatusBarItem;
-    private generateDocsItem: vscode.StatusBarItem;
 
     constructor() {
-        // Create status bar items
+        // Create status bar items (removed runTestsItem and generateDocsItem to save space)
         this.testToggleItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
         this.docToggleItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 99);
-        this.runTestsItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 98);
-        this.generateDocsItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 97);
 
         // Configure items
         this.testToggleItem.command = 'pytestembed.toggleTestBlocks';
@@ -130,14 +144,6 @@ class StatusBarManager {
 
         this.docToggleItem.command = 'pytestembed.toggleDocBlocks';
         this.docToggleItem.tooltip = 'Toggle Doc Blocks Visibility';
-
-        this.runTestsItem.command = 'pytestembed.runTests';
-        this.runTestsItem.text = '$(play) Run Tests';
-        this.runTestsItem.tooltip = 'Run PyTestEmbed Tests';
-
-        this.generateDocsItem.command = 'pytestembed.generateDocs';
-        this.generateDocsItem.text = '$(file-text) Gen Docs';
-        this.generateDocsItem.tooltip = 'Generate PyTestEmbed Documentation';
 
         this.updateItems();
         this.showItems();
@@ -153,8 +159,6 @@ class StatusBarManager {
         if (editor && editor.document.languageId === 'python' && isPyTestEmbedFile(editor.document)) {
             this.testToggleItem.show();
             this.docToggleItem.show();
-            this.runTestsItem.show();
-            this.generateDocsItem.show();
         } else {
             this.hideItems();
         }
@@ -163,15 +167,11 @@ class StatusBarManager {
     hideItems() {
         this.testToggleItem.hide();
         this.docToggleItem.hide();
-        this.runTestsItem.hide();
-        this.generateDocsItem.hide();
     }
 
     dispose() {
         this.testToggleItem.dispose();
         this.docToggleItem.dispose();
-        this.runTestsItem.dispose();
-        this.generateDocsItem.dispose();
     }
 }
 
@@ -368,6 +368,226 @@ class PyTestEmbedQuickFixProvider implements vscode.CodeActionProvider {
     private isTestExpression(lineText: string): boolean {
         // Check if this line contains a PyTestEmbed test expression
         return /^\s*(.+?)\s*:\s*".*"[,]?$/.test(lineText);
+    }
+}
+
+/**
+ * Hover provider for dependency information
+ */
+class PyTestEmbedHoverProvider implements vscode.HoverProvider {
+    public provideHover(document: vscode.TextDocument, position: vscode.Position, token: vscode.CancellationToken): vscode.ProviderResult<vscode.Hover> {
+        const wordRange = document.getWordRangeAtPosition(position);
+        if (!wordRange) {
+            return;
+        }
+
+        const word = document.getText(wordRange);
+        const line = document.lineAt(position.line);
+
+        // Check if this is a function or class definition
+        if (this.isFunctionOrClassDefinition(line.text, word)) {
+            return this.getDependencyHover(document, word, position);
+        }
+
+        return;
+    }
+
+    private isFunctionOrClassDefinition(lineText: string, word: string): boolean {
+        const trimmed = lineText.trim();
+        return (trimmed.startsWith('def ') || trimmed.startsWith('class ')) &&
+               trimmed.includes(word) &&
+               trimmed.includes('(') &&
+               trimmed.endsWith(':');
+    }
+
+    private async getDependencyHover(document: vscode.TextDocument, elementName: string, position: vscode.Position): Promise<vscode.Hover | undefined> {
+        const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
+        if (!workspaceFolder) {
+            return;
+        }
+
+        const relativePath = require('path').relative(workspaceFolder.uri.fsPath, document.fileName);
+        const elementId = `${relativePath}:${elementName}:${position.line + 1}`;
+
+        // Check if we have cached dependency information
+        const cachedInfo = state.dependencyCache.get(elementId);
+
+        if (cachedInfo) {
+            // Use cached information to create rich hover content
+            const hoverContent = new vscode.MarkdownString();
+            hoverContent.isTrusted = true;
+            hoverContent.supportHtml = true;
+
+            // Header with element name and dead code indicator
+            if (cachedInfo.is_dead_code) {
+                hoverContent.appendMarkdown(`**⚠️ ${elementName}** *(Dead Code)*\n\n`);
+                hoverContent.appendMarkdown(`🚨 **This code appears to be unused**\n\n`);
+            } else {
+                hoverContent.appendMarkdown(`**🔗 ${elementName}**\n\n`);
+            }
+
+            // Dependencies section
+            if (cachedInfo.enhanced_dependencies && cachedInfo.enhanced_dependencies.length > 0) {
+                hoverContent.appendMarkdown(`**Dependencies (${cachedInfo.dependency_count}):**\n`);
+                cachedInfo.enhanced_dependencies.slice(0, 5).forEach(dep => {
+                    const tooltip = dep.documentation ? dep.documentation.replace(/\n/g, ' ').substring(0, 100) : `${dep.element_type} in ${dep.file_path}`;
+                    hoverContent.appendMarkdown(`• [${dep.name}](command:pytestembed.navigateToDefinition?${encodeURIComponent(JSON.stringify({file: dep.file_path, name: dep.name}))} "${tooltip}")\n`);
+                });
+                if (cachedInfo.enhanced_dependencies.length > 5) {
+                    hoverContent.appendMarkdown(`• ... and ${cachedInfo.enhanced_dependencies.length - 5} more\n`);
+                }
+                hoverContent.appendMarkdown(`\n`);
+            } else if (cachedInfo.dependencies && cachedInfo.dependencies.length > 0) {
+                // Fallback to original format if enhanced not available
+                hoverContent.appendMarkdown(`**Dependencies (${cachedInfo.dependency_count}):**\n`);
+                cachedInfo.dependencies.slice(0, 5).forEach(dep => {
+                    const [depFile, depName] = dep.split(':');
+                    hoverContent.appendMarkdown(`• [${depName}](command:pytestembed.navigateToDefinition?${encodeURIComponent(JSON.stringify({file: depFile, name: depName}))})\n`);
+                });
+                if (cachedInfo.dependencies.length > 5) {
+                    hoverContent.appendMarkdown(`• ... and ${cachedInfo.dependencies.length - 5} more\n`);
+                }
+                hoverContent.appendMarkdown(`\n`);
+            } else {
+                hoverContent.appendMarkdown(`**Dependencies:** None\n\n`);
+            }
+
+            // Dependents section
+            if (cachedInfo.enhanced_dependents && cachedInfo.enhanced_dependents.length > 0) {
+                hoverContent.appendMarkdown(`**Used by (${cachedInfo.dependent_count}):**\n`);
+                cachedInfo.enhanced_dependents.slice(0, 5).forEach(dep => {
+                    const tooltip = dep.documentation ? dep.documentation.replace(/\n/g, ' ').substring(0, 100) : `${dep.element_type} in ${dep.file_path}`;
+                    hoverContent.appendMarkdown(`• [${dep.name}](command:pytestembed.navigateToDefinition?${encodeURIComponent(JSON.stringify({file: dep.file_path, name: dep.name}))} "${tooltip}")\n`);
+                });
+                if (cachedInfo.enhanced_dependents.length > 5) {
+                    hoverContent.appendMarkdown(`• ... and ${cachedInfo.enhanced_dependents.length - 5} more\n`);
+                }
+            } else if (cachedInfo.dependents && cachedInfo.dependents.length > 0) {
+                // Fallback to original format if enhanced not available
+                hoverContent.appendMarkdown(`**Used by (${cachedInfo.dependent_count}):**\n`);
+                cachedInfo.dependents.slice(0, 5).forEach(dep => {
+                    const [depFile, depName] = dep.split(':');
+                    hoverContent.appendMarkdown(`• [${depName}](command:pytestembed.navigateToDefinition?${encodeURIComponent(JSON.stringify({file: depFile, name: depName}))})\n`);
+                });
+                if (cachedInfo.dependents.length > 5) {
+                    hoverContent.appendMarkdown(`• ... and ${cachedInfo.dependents.length - 5} more\n`);
+                }
+            } else {
+                hoverContent.appendMarkdown(`**Used by:** None (potential dead code)\n`);
+            }
+
+            return new vscode.Hover(hoverContent);
+        }
+
+        // Request dependency information from the live server if not cached
+        if (state.liveTestSocket && state.liveTestSocket.readyState === 1) {
+            try {
+                const request = {
+                    command: 'get_dependencies',
+                    element_id: elementId,
+                    file_path: relativePath,
+                    element_name: elementName,
+                    line_number: position.line + 1
+                };
+
+                state.liveTestSocket.send(JSON.stringify(request));
+
+                // Return a loading hover
+                const hoverContent = new vscode.MarkdownString();
+                hoverContent.appendMarkdown(`**${elementName}** - Dependency Information\n\n`);
+                hoverContent.appendMarkdown(`🔍 Loading dependency information...\n\n`);
+                hoverContent.appendMarkdown(`*Hover again in a moment for updated information*`);
+
+                return new vscode.Hover(hoverContent);
+            } catch (error) {
+                console.error('Error requesting dependency information:', error);
+            }
+        }
+
+        // Fallback hover when live server is not available
+        const hoverContent = new vscode.MarkdownString();
+        hoverContent.appendMarkdown(`**${elementName}**\n\n`);
+        hoverContent.appendMarkdown(`🔗 Dependency information available when Live Test Server is connected\n\n`);
+        hoverContent.appendMarkdown(`Start the Live Test Server to see:\n`);
+        hoverContent.appendMarkdown(`• What this depends on\n`);
+        hoverContent.appendMarkdown(`• What depends on this\n`);
+        hoverContent.appendMarkdown(`• Dead code detection\n`);
+        hoverContent.appendMarkdown(`• Navigation links`);
+
+        return new vscode.Hover(hoverContent);
+    }
+}
+
+/**
+ * Definition provider for navigation to dependencies
+ */
+class PyTestEmbedDefinitionProvider implements vscode.DefinitionProvider {
+    public provideDefinition(document: vscode.TextDocument, position: vscode.Position, token: vscode.CancellationToken): vscode.ProviderResult<vscode.Definition> {
+        const wordRange = document.getWordRangeAtPosition(position);
+        if (!wordRange) {
+            return;
+        }
+
+        const word = document.getText(wordRange);
+
+        // Check if this is a function call that we can navigate to
+        if (this.isFunctionCall(document, position, word)) {
+            return this.findDefinition(document, word);
+        }
+
+        return;
+    }
+
+    private isFunctionCall(document: vscode.TextDocument, position: vscode.Position, word: string): boolean {
+        const line = document.lineAt(position.line);
+        const lineText = line.text;
+        const wordStart = line.text.indexOf(word, position.character - word.length);
+
+        // Check if there's a '(' after the word (indicating a function call)
+        if (wordStart >= 0 && wordStart + word.length < lineText.length) {
+            const nextChar = lineText[wordStart + word.length];
+            return nextChar === '(';
+        }
+
+        return false;
+    }
+
+    private async findDefinition(document: vscode.TextDocument, functionName: string): Promise<vscode.Location[]> {
+        const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
+        if (!workspaceFolder) {
+            return [];
+        }
+
+        // Search for the function definition in the workspace
+        const files = await vscode.workspace.findFiles('**/*.py', '**/node_modules/**');
+        const locations: vscode.Location[] = [];
+
+        for (const file of files) {
+            try {
+                const fileDocument = await vscode.workspace.openTextDocument(file);
+                const text = fileDocument.getText();
+                const lines = text.split('\n');
+
+                for (let i = 0; i < lines.length; i++) {
+                    const line = lines[i];
+                    const trimmed = line.trim();
+
+                    // Look for function or class definitions
+                    if ((trimmed.startsWith(`def ${functionName}(`) ||
+                         trimmed.startsWith(`class ${functionName}(`)) &&
+                        trimmed.endsWith(':')) {
+
+                        const position = new vscode.Position(i, line.indexOf(functionName));
+                        locations.push(new vscode.Location(file, position));
+                    }
+                }
+            } catch (error) {
+                // Skip files that can't be read
+                continue;
+            }
+        }
+
+        return locations;
     }
 }
 

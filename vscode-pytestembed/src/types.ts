@@ -33,6 +33,9 @@ export interface ExtensionState {
     // Test results
     testResults: Map<string, TestResult[]>; // file path -> test results
     currentTestProgress: { current: number; total: number };
+
+    // Dependency information cache
+    dependencyCache: Map<string, DependencyInfo>; // element_id -> dependency info
     
     // UI components
     outputChannel: vscode.OutputChannel;
@@ -89,4 +92,29 @@ export interface PanelMessage {
     text: string;
     type: PanelMessageType;
     timestamp: number;
+}
+
+// Enhanced dependency element information
+export interface EnhancedDependencyElement {
+    id: string;
+    name: string;
+    file_path: string;
+    line_number: number;
+    documentation: string;
+    element_type: string;
+}
+
+// Dependency information
+export interface DependencyInfo {
+    element_id: string;
+    element_name: string;
+    file_path: string;
+    line_number: number;
+    dependencies: string[];
+    dependents: string[];
+    enhanced_dependencies?: EnhancedDependencyElement[];
+    enhanced_dependents?: EnhancedDependencyElement[];
+    is_dead_code: boolean;
+    dependency_count: number;
+    dependent_count: number;
 }

@@ -25,6 +25,9 @@ export let state: ExtensionState = {
     // Test results
     testResults: new Map(),
     currentTestProgress: { current: 0, total: 0 },
+
+    // Dependency information cache
+    dependencyCache: new Map(),
     
     // UI components (will be initialized in activate)
     outputChannel: null as any,

@@ -44,13 +44,25 @@ class PyTestEmbedMCPServer:
             "get_test_results": self._get_test_results,
             "get_coverage": self._get_coverage,
             "validate_syntax": self._validate_syntax,
-            "convert_to_pytestembed": self._convert_to_pytestembed
+            "convert_to_pytestembed": self._convert_to_pytestembed,
+            # Dependency graph tools
+            "get_dependencies": self._get_dependencies,
+            "get_dependents": self._get_dependents,
+            "get_element_info": self._get_element_info,
+            "find_dead_code": self._find_dead_code,
+            "get_dependency_graph": self._get_dependency_graph,
+            "analyze_impact": self._analyze_impact,
+            "find_related_code": self._find_related_code,
+            "get_navigation_suggestions": self._get_navigation_suggestions
         }
         
         self.resources = {
             "workspace": self._get_workspace_info,
             "config": self._get_config,
-            "test_status": self._get_test_status
+            "test_status": self._get_test_status,
+            "dependency_graph": self._get_dependency_graph_resource,
+            "failing_tests": self._get_failing_tests,
+            "dead_code": self._get_dead_code_resource
         }
     
     async def start(self, port: int = 3001):
@@ -250,6 +262,93 @@ class PyTestEmbedMCPServer:
                     },
                     "required": ["file_path"]
                 }
+            },
+            {
+                "name": "get_dependencies",
+                "description": "Get what a code element depends on",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {"type": "string", "description": "Path to Python file"},
+                        "element_name": {"type": "string", "description": "Name of function/class/method"},
+                        "line_number": {"type": "integer", "description": "Line number (optional)"}
+                    },
+                    "required": ["file_path", "element_name"]
+                }
+            },
+            {
+                "name": "get_dependents",
+                "description": "Get what depends on a code element (who uses it)",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {"type": "string", "description": "Path to Python file"},
+                        "element_name": {"type": "string", "description": "Name of function/class/method"},
+                        "line_number": {"type": "integer", "description": "Line number (optional)"}
+                    },
+                    "required": ["file_path", "element_name"]
+                }
+            },
+            {
+                "name": "get_element_info",
+                "description": "Get detailed information about a code element",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {"type": "string", "description": "Path to Python file"},
+                        "element_name": {"type": "string", "description": "Name of function/class/method"},
+                        "line_number": {"type": "integer", "description": "Line number (optional)"}
+                    },
+                    "required": ["file_path", "element_name"]
+                }
+            },
+            {
+                "name": "find_dead_code",
+                "description": "Find potentially unused code in the project",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {"type": "string", "description": "Path to specific file (optional)"}
+                    }
+                }
+            },
+            {
+                "name": "analyze_impact",
+                "description": "Analyze the impact of changing a code element",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {"type": "string", "description": "Path to Python file"},
+                        "element_name": {"type": "string", "description": "Name of function/class/method"},
+                        "change_type": {"type": "string", "description": "Type of change: modify, delete, rename", "default": "modify"}
+                    },
+                    "required": ["file_path", "element_name"]
+                }
+            },
+            {
+                "name": "find_related_code",
+                "description": "Find code related to a specific element (dependencies + dependents)",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {"type": "string", "description": "Path to Python file"},
+                        "element_name": {"type": "string", "description": "Name of function/class/method"},
+                        "depth": {"type": "integer", "description": "How many levels deep to search", "default": 2}
+                    },
+                    "required": ["file_path", "element_name"]
+                }
+            },
+            {
+                "name": "get_navigation_suggestions",
+                "description": "Get suggestions for where to navigate after making changes",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "changed_files": {"type": "array", "items": {"type": "string"}, "description": "List of files that were changed"},
+                        "changed_elements": {"type": "array", "items": {"type": "string"}, "description": "List of elements that were changed"}
+                    },
+                    "required": ["changed_files"]
+                }
             }
         ]
         
@@ -278,6 +377,21 @@ class PyTestEmbedMCPServer:
                 "uri": "pytestembed://test_status",
                 "name": "Test Status",
                 "description": "Current test execution status"
+            },
+            {
+                "uri": "pytestembed://dependency_graph",
+                "name": "Dependency Graph",
+                "description": "Complete project dependency graph"
+            },
+            {
+                "uri": "pytestembed://failing_tests",
+                "name": "Failing Tests",
+                "description": "List of currently failing tests"
+            },
+            {
+                "uri": "pytestembed://dead_code",
+                "name": "Dead Code",
+                "description": "Potentially unused code in the project"
             }
         ]
 
@@ -608,6 +722,186 @@ class PyTestEmbedMCPServer:
         except Exception as e:
             return {"error": f"Failed to convert file: {str(e)}"}
 
+    # Dependency graph tool implementations
+    async def _get_dependencies(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Get what a code element depends on."""
+        file_path = args["file_path"]
+        element_name = args["element_name"]
+        line_number = args.get("line_number")
+
+        if not self.live_test_client:
+            return {"error": "Live test server not available"}
+
+        try:
+            # Send request to live test server
+            await self.live_test_client.get_dependencies(file_path, element_name, line_number)
+
+            # Note: In a real implementation, we'd need to wait for the response
+            # For now, return a success message indicating the request was sent
+            return {
+                "status": "request_sent",
+                "file_path": file_path,
+                "element_name": element_name,
+                "line_number": line_number,
+                "message": "Dependency request sent to live test server. Check live server for results."
+            }
+        except Exception as e:
+            return {"error": f"Failed to get dependencies: {str(e)}"}
+
+    async def _get_dependents(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Get what depends on a code element."""
+        file_path = args["file_path"]
+        element_name = args["element_name"]
+        line_number = args.get("line_number")
+
+        if not self.live_test_client:
+            return {"error": "Live test server not available"}
+
+        try:
+            # Send request to live test server
+            await self.live_test_client.get_dependents(file_path, element_name, line_number)
+
+            return {
+                "status": "request_sent",
+                "file_path": file_path,
+                "element_name": element_name,
+                "line_number": line_number,
+                "message": "Dependents request sent to live test server. Check live server for results."
+            }
+        except Exception as e:
+            return {"error": f"Failed to get dependents: {str(e)}"}
+
+    async def _get_element_info(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Get detailed information about a code element."""
+        file_path = args["file_path"]
+        element_name = args["element_name"]
+        line_number = args.get("line_number")
+
+        if not self.live_test_client:
+            return {"error": "Live test server not available"}
+
+        try:
+            # Send both dependency and dependent requests
+            await self.live_test_client.get_dependencies(file_path, element_name, line_number)
+            await self.live_test_client.get_dependents(file_path, element_name, line_number)
+
+            return {
+                "status": "request_sent",
+                "file_path": file_path,
+                "element_name": element_name,
+                "line_number": line_number,
+                "message": "Element info requests sent to live test server. Check live server for results."
+            }
+        except Exception as e:
+            return {"error": f"Failed to get element info: {str(e)}"}
+
+    async def _find_dead_code(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Find potentially unused code."""
+        file_path = args.get("file_path")
+
+        if not self.live_test_client:
+            return {"error": "Live test server not available"}
+
+        try:
+            # Send request to live test server
+            await self.live_test_client.find_dead_code(file_path)
+
+            return {
+                "status": "request_sent",
+                "file_path": file_path,
+                "message": "Dead code detection request sent to live test server. Check live server for results."
+            }
+        except Exception as e:
+            return {"error": f"Failed to find dead code: {str(e)}"}
+
+    async def _get_dependency_graph(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Get the complete dependency graph."""
+        if not self.live_test_client:
+            return {"error": "Live test server not available"}
+
+        try:
+            # Send request to live test server
+            await self.live_test_client.get_dependency_graph()
+
+            return {
+                "status": "request_sent",
+                "message": "Dependency graph request sent to live test server. Check live server for results."
+            }
+        except Exception as e:
+            return {"error": f"Failed to get dependency graph: {str(e)}"}
+
+    async def _analyze_impact(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Analyze the impact of changing a code element."""
+        file_path = args["file_path"]
+        element_name = args["element_name"]
+        change_type = args.get("change_type", "modify")
+
+        if not self.live_test_client:
+            return {"error": "Live test server not available"}
+
+        try:
+            # Send request to live test server
+            await self.live_test_client.analyze_impact(file_path, element_name, change_type)
+
+            return {
+                "status": "request_sent",
+                "file_path": file_path,
+                "element_name": element_name,
+                "change_type": change_type,
+                "message": "Impact analysis request sent to live test server. Check live server for results."
+            }
+        except Exception as e:
+            return {"error": f"Failed to analyze impact: {str(e)}"}
+
+    async def _find_related_code(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Find code related to a specific element."""
+        file_path = args["file_path"]
+        element_name = args["element_name"]
+        depth = args.get("depth", 2)
+
+        if not self.live_test_client:
+            return {"error": "Live test server not available"}
+
+        try:
+            # Send both dependency and dependent requests to get related code
+            await self.live_test_client.get_dependencies(file_path, element_name)
+            await self.live_test_client.get_dependents(file_path, element_name)
+
+            return {
+                "status": "request_sent",
+                "file_path": file_path,
+                "element_name": element_name,
+                "depth": depth,
+                "message": "Related code requests sent to live test server. Check live server for results."
+            }
+        except Exception as e:
+            return {"error": f"Failed to find related code: {str(e)}"}
+
+    async def _get_navigation_suggestions(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Get navigation suggestions after making changes."""
+        changed_files = args["changed_files"]
+        changed_elements = args.get("changed_elements", [])
+
+        if not self.live_test_client:
+            return {"error": "Live test server not available"}
+
+        try:
+            # For each changed file, get impact analysis
+            for file_path in changed_files:
+                await self.live_test_client.find_dead_code(file_path)
+
+            # Get failing tests to suggest what to check
+            await self.live_test_client.get_failing_tests()
+
+            return {
+                "status": "request_sent",
+                "changed_files": changed_files,
+                "changed_elements": changed_elements,
+                "message": "Navigation analysis requests sent to live test server. Check live server for results."
+            }
+        except Exception as e:
+            return {"error": f"Failed to get navigation suggestions: {str(e)}"}
+
     # Resource implementations
     async def _get_workspace_info(self) -> Dict[str, Any]:
         """Get workspace information."""
@@ -630,6 +924,90 @@ class PyTestEmbedMCPServer:
             "live_test_server_connected": self.live_test_client is not None,
             "live_test_port": self.live_test_port,
             "workspace": str(self.workspace_path)
+        }
+
+    async def _get_dependency_graph_resource(self) -> Dict[str, Any]:
+        """Get dependency graph as a resource."""
+        if not self.live_test_client:
+            return {
+                "error": "Live test server not available",
+                "elements": {},
+                "dependencies": {},
+                "message": "Start live test server to access dependency graph"
+            }
+
+        return {
+            "status": "available",
+            "description": "Complete project dependency graph showing code relationships",
+            "capabilities": [
+                "Find what code depends on what",
+                "Identify dead/unused code",
+                "Analyze impact of changes",
+                "Navigate code relationships",
+                "Smart test selection based on dependencies"
+            ],
+            "available_tools": [
+                "get_dependencies - Find what an element depends on",
+                "get_dependents - Find what depends on an element",
+                "find_dead_code - Identify unused code",
+                "analyze_impact - Assess change impact",
+                "get_dependency_graph - Get complete graph",
+                "find_related_code - Find related elements",
+                "get_navigation_suggestions - Get navigation help"
+            ],
+            "message": "Use dependency graph tools to explore code relationships and get intelligent insights"
+        }
+
+    async def _get_failing_tests(self) -> Dict[str, Any]:
+        """Get currently failing tests as a resource."""
+        if not self.live_test_client:
+            return {
+                "error": "Live test server not available",
+                "failing_tests": [],
+                "message": "Start live test server to access test results"
+            }
+
+        return {
+            "status": "available",
+            "description": "Currently failing tests in the project",
+            "capabilities": [
+                "List all failing tests",
+                "Show test failure details",
+                "Track test history",
+                "Identify flaky tests"
+            ],
+            "available_tools": [
+                "get_failing_tests - Get list of failing tests",
+                "run_tests - Run tests for a file",
+                "run_test_at_line - Run specific test"
+            ],
+            "message": "Use get_failing_tests tool to retrieve current test failures"
+        }
+
+    async def _get_dead_code_resource(self) -> Dict[str, Any]:
+        """Get dead code information as a resource."""
+        if not self.live_test_client:
+            return {
+                "error": "Live test server not available",
+                "dead_code": [],
+                "message": "Start live test server to access dead code detection"
+            }
+
+        return {
+            "status": "available",
+            "description": "Potentially unused code in the project",
+            "capabilities": [
+                "Identify unused functions and methods",
+                "Find unreferenced classes",
+                "Detect orphaned code",
+                "Suggest cleanup opportunities"
+            ],
+            "available_tools": [
+                "find_dead_code - Detect unused code",
+                "get_dependents - Check if code is used",
+                "analyze_impact - Assess removal impact"
+            ],
+            "message": "Use find_dead_code tool to identify potentially unused code"
         }
 
 
