@@ -209,7 +209,15 @@ class LiveTestRunner:
     
     async def run_file_tests(self, file_path: str):
         """Run all tests in a file and broadcast results."""
-        file_path = str(self.workspace_path / file_path)
+        # Handle both absolute and relative paths
+        if Path(file_path).is_absolute():
+            # Already absolute path from VSCode
+            full_path = file_path
+        else:
+            # Relative path, make it absolute
+            full_path = str(self.workspace_path / file_path)
+
+        file_path = full_path
         
         # Notify clients that tests are running
         await self.broadcast({
@@ -243,6 +251,19 @@ class LiveTestRunner:
                 if cls.test_blocks:
                     all_items.append(cls)
 
+            # Add global test blocks
+            if parsed_program.global_test_blocks:
+                for test_block in parsed_program.global_test_blocks:
+                    # Create a global test context for each test block
+                    global_context = type('GlobalTestContext', (), {
+                        'name': 'global_test',
+                        'line_number': test_block.test_cases[0].line_number if test_block.test_cases else 1,
+                        'parameters': [],
+                        'test_blocks': [test_block],
+                        'is_global_test': True
+                    })()
+                    all_items.append(global_context)
+
             for item in all_items:
                 if hasattr(item, 'test_blocks') and item.test_blocks:
                     for test_block in item.test_blocks:
@@ -266,6 +287,20 @@ class LiveTestRunner:
                                     file_path, item, test_case, i
                                 )
                             test_results.append(result)
+
+                            # Broadcast individual test status update
+                            await self.broadcast({
+                                'type': 'test_status_update',
+                                'data': {
+                                    'test_name': result.test_name,
+                                    'status': result.status,
+                                    'message': result.message,
+                                    'duration': result.duration,
+                                    'line_number': result.line_number,
+                                    'file_path': result.file_path,
+                                    'assertion': result.assertion
+                                }
+                            })
 
                             # Update coverage
                             for line_num in range(item.line_number,
@@ -414,7 +449,11 @@ class LiveTestRunner:
             # For now, we'll use a simple heuristic: run tests for all functions/classes in the file
             # In the future, this could be enhanced with git diff analysis
 
-            full_path = str(self.workspace_path / file_path)
+            # Handle both absolute and relative paths
+            if Path(file_path).is_absolute():
+                full_path = file_path
+            else:
+                full_path = str(self.workspace_path / file_path)
             parsed_program = self.parser.parse_file(full_path)
 
             affected_tests = []
@@ -456,7 +495,7 @@ class LiveTestRunner:
                         })
 
             # Collect all global test blocks (module-level tests)
-            for test_block in parsed_program.test_blocks:
+            for test_block in parsed_program.global_test_blocks:
                 for test_case in test_block.test_cases:
                     affected_tests.append({
                         'line_number': test_case.line_number,
@@ -472,7 +511,11 @@ class LiveTestRunner:
 
     async def run_specific_tests(self, file_path: str, affected_tests: list):
         """Run only specific tests that were affected by changes."""
-        full_path = str(self.workspace_path / file_path)
+        # Handle both absolute and relative paths
+        if Path(file_path).is_absolute():
+            full_path = file_path
+        else:
+            full_path = str(self.workspace_path / file_path)
 
         # Notify clients that tests are running
         await self.broadcast({
@@ -548,7 +591,7 @@ class LiveTestRunner:
                 elif test_info['type'] == 'global_test':
                     # Find the global test block and run the specific test
                     # Global tests are at the module level, not inside functions/classes
-                    for test_block in parsed_program.test_blocks:
+                    for test_block in parsed_program.global_test_blocks:
                         for i, test_case in enumerate(test_block.test_cases):
                             if test_case.line_number == test_info['line_number']:
                                 # For global tests, we need to determine the context
@@ -662,7 +705,7 @@ class LiveTestRunner:
                             # This is a method, transform for class instance
                             class_name = self.find_class_name_for_method(item)
                             if class_name:
-                                transformed_stmt = self._transform_statement_for_class_instance(stmt, class_name)
+                                transformed_stmt = self._transform_statement_for_class_instance(stmt, class_name, include_instance_creation=False)
                             else:
                                 transformed_stmt = stmt
                         elif hasattr(item, 'is_global_test') and hasattr(item, 'referenced_class'):
@@ -673,14 +716,19 @@ class LiveTestRunner:
                             # This is a class-level test that references class methods
                             class_name = item.referenced_class
                             transformed_stmt = self._transform_statement_for_class_instance(stmt, class_name)
+                        elif hasattr(item, 'methods') and hasattr(item, 'name'):
+                            # This is a class-level test (item is a ClassDef)
+                            class_name = item.name
+                            transformed_stmt = self._transform_statement_for_class_instance(stmt, class_name)
                         else:
                             transformed_stmt = stmt
                         transformed_statements.append(transformed_stmt)
                     setup_statements = "\n    ".join(transformed_statements)
 
                 # Transform assertion for method calls if needed
-                transformed_assertion = self.transform_assertion_for_context(assertion, item)
-                print(f"🔄 Auto test transformation: '{assertion}' -> '{transformed_assertion}'")
+                # Check if we have setup statements that create an instance
+                has_instance_setup = 'instance.' in setup_statements
+                transformed_assertion = self.transform_assertion_for_context(assertion, item, has_instance_setup)
 
                 # Split instance creation from assertion if needed
                 instance_creation = ""
@@ -695,9 +743,16 @@ class LiveTestRunner:
                     # Check if we need to create an instance for setup statements
                     needs_instance = 'instance.' in setup_statements
                     if needs_instance:
-                        # Extract class name from transformed assertion
+                        # Extract class name from item context
                         class_name = None
-                        if 'instance = ' in transformed_assertion:
+                        if hasattr(item, 'name') and hasattr(item, 'methods'):
+                            # This is a class-level test
+                            class_name = item.name
+                        elif hasattr(item, 'is_class_test') and hasattr(item, 'referenced_class'):
+                            # This is a class test context
+                            class_name = item.referenced_class
+                        elif 'instance = ' in transformed_assertion:
+                            # Fallback: extract from transformed assertion
                             class_name = transformed_assertion.split('instance = ')[1].split('()')[0]
 
                         if class_name:
@@ -798,12 +853,13 @@ except Exception as e:
                 # print(test_code)
                 # print("=" * 50)
 
-                # Execute the test
+                # Execute the test with longer timeout and better error handling
                 result = subprocess.run(
                     ['python', temp_file.name],
                     capture_output=True,
                     text=True,
-                    timeout=10
+                    timeout=30,  # Increased from 10 to 30 seconds
+                    cwd=self.workspace_path  # Set working directory
                 )
 
                 # Parse the output
@@ -836,6 +892,13 @@ except Exception as e:
 
         except subprocess.TimeoutExpired:
             return False, None, "Test execution timed out"
+        except BrokenPipeError:
+            return False, None, "Test execution interrupted (broken pipe)"
+        except OSError as e:
+            if e.errno == 32:  # Broken pipe
+                return False, None, "Test execution interrupted (broken pipe)"
+            else:
+                return False, None, f"Test execution failed: {str(e)}"
         except Exception as e:
             return False, None, f"Test execution failed: {str(e)}"
         finally:
@@ -1441,22 +1504,70 @@ except Exception as e:
 
         return '\n'.join(clean_lines)
 
-    def _transform_statement_for_class_instance(self, statement: str, class_name: str) -> str:
+    def _transform_statement_for_class_instance(self, statement: str, class_name: str, include_instance_creation: bool = True) -> str:
         """Transform a statement to use class instance context."""
         # For statements like "a = bar(2)", transform to "a = instance.bar(2)"
+        # For attribute access like "data", transform to "instance.data"
         import re
 
         # Pattern to match function calls that should be method calls
-        # Look for patterns like "variable = function_name(args)"
-        pattern = r'(\w+)\s*=\s*(\w+)\s*\('
+        # Look for patterns like "variable = function_name(args)" or just "function_name(args)"
+        # Make sure we don't match already transformed calls (those with instance. prefix)
+        assignment_pattern = r'(\w+)\s*=\s*(?!instance\.)(\w+)\s*\('
+        call_pattern = r'(?<!instance\.)(?<!\w)\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\('
 
-        def replace_func(match):
+        # Pattern to match attribute access (variables that should be instance attributes)
+        # This is more complex - we need to identify standalone identifiers that aren't builtins
+        # Exclude attributes accessed through objects (like stats["count"]) or method calls
+        attribute_pattern = r'(?<!["\'\[\w\.])(?<!\w)\b([a-zA-Z_][a-zA-Z0-9_]*)\b(?!\s*[\(\.\[\"\'])'
+
+        def replace_assignment(match):
             var_name = match.group(1)
             func_name = match.group(2)
+            # Skip built-in functions
+            builtins = {'print', 'len', 'str', 'int', 'float', 'bool', 'list', 'dict', 'set', 'tuple',
+                       'abs', 'max', 'min', 'sum', 'all', 'any', 'range', 'enumerate', 'zip', 'map', 'filter',
+                       'isinstance', 'hasattr', 'type', 'callable', 'globals', '__name__'}
+            if func_name in builtins:
+                return match.group(0)
             # Transform to use instance
             return f"{var_name} = instance.{func_name}("
 
-        transformed = re.sub(pattern, replace_func, statement)
+        def replace_call(match):
+            func_name = match.group(1)
+            # Skip built-in functions
+            builtins = {'print', 'len', 'str', 'int', 'float', 'bool', 'list', 'dict', 'set', 'tuple',
+                       'abs', 'max', 'min', 'sum', 'all', 'any', 'range', 'enumerate', 'zip', 'map', 'filter',
+                       'isinstance', 'hasattr', 'type', 'callable', 'globals', '__name__'}
+            if func_name in builtins:
+                return match.group(0)
+            # Transform to use instance
+            return f"instance.{func_name}("
+
+        def replace_attribute(match):
+            attr_name = match.group(1)
+            # Skip built-in functions, keywords, and common variables
+            builtins = {'print', 'len', 'str', 'int', 'float', 'bool', 'list', 'dict', 'set', 'tuple',
+                       'abs', 'max', 'min', 'sum', 'all', 'any', 'range', 'enumerate', 'zip', 'map', 'filter',
+                       'isinstance', 'hasattr', 'type', 'callable', 'globals', '__name__', 'True', 'False', 'None',
+                       'and', 'or', 'not', 'if', 'else', 'elif', 'for', 'while', 'def', 'class', 'return',
+                       'import', 'from', 'as', 'try', 'except', 'finally', 'with', 'lambda', 'yield',
+                       'stats', 'result', 'instance'}  # Also skip common variable names
+            if attr_name in builtins:
+                return match.group(0)
+            # Transform any attribute that isn't a builtin/keyword and looks like an instance attribute
+            # Check if this is already transformed (avoid double transformation)
+            full_match = match.group(0)
+            if 'instance.' in statement[:match.start()]:
+                # Already has instance prefix nearby, don't transform
+                return full_match
+            return f"instance.{attr_name}"
+
+        # First handle assignments, then handle standalone calls, then handle attributes
+        transformed = re.sub(assignment_pattern, replace_assignment, statement)
+        transformed = re.sub(call_pattern, replace_call, transformed)
+        transformed = re.sub(attribute_pattern, replace_attribute, transformed)
+
         return transformed
 
     def find_class_name_for_method(self, method_item) -> str:
@@ -1653,7 +1764,7 @@ except Exception as e:
         except Exception as e:
             print(f"⚠️ Error updating smart testing models: {e}")
 
-    def transform_assertion_for_context(self, assertion: str, item) -> str:
+    def transform_assertion_for_context(self, assertion: str, item, has_instance_setup: bool = False) -> str:
         """Transform test assertions to work in the correct context."""
 
         # Check if this is a method test (has 'self' parameter)
@@ -1662,50 +1773,139 @@ except Exception as e:
             class_name = self.find_class_name_for_method(item)
 
             if class_name:
-                return self._transform_for_class_instance(assertion, class_name)
+                if has_instance_setup:
+                    # Instance already created by setup, just transform method calls
+                    return self._transform_method_calls_only(assertion)
+                else:
+                    return self._transform_for_class_instance(assertion, class_name)
 
         # Check if this is a class-level test (item is a ClassDef)
         elif hasattr(item, 'methods') and hasattr(item, 'name'):
             # This is a class-level test, use the class name directly
             class_name = item.name
-            return self._transform_for_class_instance(assertion, class_name)
+            if has_instance_setup:
+                # Instance already created by setup, just transform method calls
+                return self._transform_method_calls_only(assertion)
+            else:
+                return self._transform_for_class_instance(assertion, class_name)
 
         # Check if this is a global test that references class methods
         elif hasattr(item, 'is_global_test') and hasattr(item, 'referenced_class'):
             # This is a global test that references class methods
             class_name = item.referenced_class
-            return self._transform_for_class_instance(assertion, class_name)
+            if has_instance_setup:
+                return self._transform_method_calls_only(assertion)
+            else:
+                return self._transform_for_class_instance(assertion, class_name)
 
         # Check if this is a class-level test
         elif hasattr(item, 'is_class_test') and hasattr(item, 'referenced_class'):
             # This is a class-level test that references class methods
             class_name = item.referenced_class
-            return self._transform_for_class_instance(assertion, class_name)
+            if has_instance_setup:
+                return self._transform_method_calls_only(assertion)
+            else:
+                return self._transform_for_class_instance(assertion, class_name)
+
+        # Check if this is a function test (standalone function)
+        elif hasattr(item, 'name') and hasattr(item, 'parameters') and not (hasattr(item, 'methods')):
+            # This is a function test - no transformation needed, just call the function directly
+            return assertion
 
         return assertion
 
-    def _transform_for_class_instance(self, assertion: str, class_name: str) -> str:
-        """Transform assertion to use class instance."""
+    def _transform_method_calls_only(self, assertion: str) -> str:
+        """Transform method calls and attribute access in assertion without creating new instance."""
         import re
 
         # Look for method calls that need to be transformed
-        # Pattern to match function calls like foo(4), bar(2), etc.
-        method_call_pattern = r'\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\('
+        # Pattern to match function calls like foo(4), bar(2), get_history(), etc.
+        # Avoid matching already transformed calls (those with instance. prefix)
+        method_call_pattern = r'(?<!instance\.)(?<!\w)\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\('
+
+        # Pattern to match attribute access (variables that should be instance attributes)
+        # Exclude attributes accessed through objects (like stats["count"]) or method calls
+        attribute_pattern = r'(?<!["\'\[\w\.])(?<!\w)\b([a-zA-Z_][a-zA-Z0-9_]*)\b(?!\s*[\(\.\[\"\'])'
 
         def replace_method_call(match):
             method_name = match.group(1)
             # Skip built-in functions and common functions
             builtins = {'print', 'len', 'str', 'int', 'float', 'bool', 'list', 'dict', 'set', 'tuple',
-                       'abs', 'max', 'min', 'sum', 'all', 'any', 'range', 'enumerate', 'zip', 'map', 'filter'}
+                       'abs', 'max', 'min', 'sum', 'all', 'any', 'range', 'enumerate', 'zip', 'map', 'filter',
+                       'isinstance', 'hasattr', 'type', 'callable', 'globals', '__name__'}
             if method_name in builtins:
                 return match.group(0)
 
             # Transform to instance method call
             return f'instance.{method_name}('
 
-        # Create instance and transform method calls
-        transformed = f"instance = {class_name}(); " + re.sub(method_call_pattern, replace_method_call, assertion)
+        def replace_attribute(match):
+            attr_name = match.group(1)
+            # Skip built-in functions, keywords, and common variables
+            builtins = {'print', 'len', 'str', 'int', 'float', 'bool', 'list', 'dict', 'set', 'tuple',
+                       'abs', 'max', 'min', 'sum', 'all', 'any', 'range', 'enumerate', 'zip', 'map', 'filter',
+                       'isinstance', 'hasattr', 'type', 'callable', 'globals', '__name__', 'True', 'False', 'None',
+                       'and', 'or', 'not', 'if', 'else', 'elif', 'for', 'while', 'def', 'class', 'return',
+                       'import', 'from', 'as', 'try', 'except', 'finally', 'with', 'lambda', 'yield',
+                       'stats', 'result', 'instance'}  # Also skip common variable names
+            if attr_name in builtins:
+                return match.group(0)
+            # Transform any attribute that isn't a builtin/keyword and looks like an instance attribute
+            return f"instance.{attr_name}"
+
+        # Transform method calls and attribute access in assertion (no instance creation)
+        transformed = re.sub(method_call_pattern, replace_method_call, assertion)
+        transformed = re.sub(attribute_pattern, replace_attribute, transformed)
         return transformed
+
+    def _transform_for_class_instance(self, assertion: str, class_name: str, setup_statements: str = "") -> str:
+        """Transform assertion to use class instance."""
+        import re
+
+        # Look for method calls that need to be transformed
+        # Pattern to match function calls like foo(4), bar(2), get_history(), etc.
+        # Avoid matching already transformed calls (those with instance. prefix)
+        method_call_pattern = r'(?<!instance\.)(?<!\w)\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\('
+
+        # Pattern to match attribute access (variables that should be instance attributes)
+        # Exclude attributes accessed through objects (like stats["count"]) or method calls
+        attribute_pattern = r'(?<!["\'\[\w\.])(?<!\w)\b([a-zA-Z_][a-zA-Z0-9_]*)\b(?!\s*[\(\.\[\"\'])'
+
+        def replace_method_call(match):
+            method_name = match.group(1)
+            # Skip built-in functions and common functions
+            builtins = {'print', 'len', 'str', 'int', 'float', 'bool', 'list', 'dict', 'set', 'tuple',
+                       'abs', 'max', 'min', 'sum', 'all', 'any', 'range', 'enumerate', 'zip', 'map', 'filter',
+                       'isinstance', 'hasattr', 'type', 'callable', 'globals', '__name__'}
+            if method_name in builtins:
+                return match.group(0)
+
+            # Transform to instance method call
+            return f'instance.{method_name}('
+
+        def replace_attribute(match):
+            attr_name = match.group(1)
+            # Skip built-in functions, keywords, and common variables
+            builtins = {'print', 'len', 'str', 'int', 'float', 'bool', 'list', 'dict', 'set', 'tuple',
+                       'abs', 'max', 'min', 'sum', 'all', 'any', 'range', 'enumerate', 'zip', 'map', 'filter',
+                       'isinstance', 'hasattr', 'type', 'callable', 'globals', '__name__', 'True', 'False', 'None',
+                       'and', 'or', 'not', 'if', 'else', 'elif', 'for', 'while', 'def', 'class', 'return',
+                       'import', 'from', 'as', 'try', 'except', 'finally', 'with', 'lambda', 'yield',
+                       'stats', 'result', 'instance'}  # Also skip common variable names
+            if attr_name in builtins:
+                return match.group(0)
+            # Transform any attribute that isn't a builtin/keyword and looks like an instance attribute
+            return f"instance.{attr_name}"
+
+        # Transform method calls and attribute access in assertion
+        transformed_assertion = re.sub(method_call_pattern, replace_method_call, assertion)
+        transformed_assertion = re.sub(attribute_pattern, replace_attribute, transformed_assertion)
+
+        # Create instance, apply setup statements, then run assertion
+        if setup_statements:
+            return f"instance = {class_name}(); {setup_statements}; {transformed_assertion}"
+        else:
+            return f"instance = {class_name}(); {transformed_assertion}"
 
     def find_class_name_for_method(self, method_item):
         """Find the class name that contains this method."""

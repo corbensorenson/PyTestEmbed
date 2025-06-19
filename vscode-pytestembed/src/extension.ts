@@ -17,6 +17,83 @@ import { registerFoldingProvider } from './folding';
  * and comprehensive UI controls for PyTestEmbed embedded test and documentation blocks.
  */
 
+/**
+ * Register double-click handler for opening definitions in split editor
+ */
+function registerDoubleClickHandler(context: vscode.ExtensionContext) {
+    let lastClickTime = 0;
+    let lastClickPosition: vscode.Position | undefined;
+    const doubleClickThreshold = 500; // milliseconds
+
+    const clickHandler = vscode.window.onDidChangeTextEditorSelection(async (event) => {
+        if (!event.textEditor || event.textEditor.document.languageId !== 'python') {
+            return;
+        }
+
+        const currentTime = Date.now();
+        const selection = event.selections[0];
+
+        // Check if this is a potential double-click (same position, within time threshold)
+        if (lastClickPosition &&
+            selection.start.isEqual(lastClickPosition) &&
+            currentTime - lastClickTime < doubleClickThreshold) {
+
+            // This is a double-click, try to open definition in split editor
+            await openDefinitionInSplitEditor(event.textEditor, selection.start);
+        }
+
+        lastClickTime = currentTime;
+        lastClickPosition = selection.start;
+    });
+
+    context.subscriptions.push(clickHandler);
+}
+
+/**
+ * Open the definition of the symbol at the given position in a split editor
+ */
+async function openDefinitionInSplitEditor(editor: vscode.TextEditor, position: vscode.Position) {
+    try {
+        // Get the word at the cursor position
+        const wordRange = editor.document.getWordRangeAtPosition(position);
+        if (!wordRange) {
+            return;
+        }
+
+        const word = editor.document.getText(wordRange);
+        console.log(`🔍 Double-clicked on: ${word}`);
+
+        // Use VSCode's built-in "Go to Definition" command to find the definition
+        const definitions = await vscode.commands.executeCommand<vscode.Location[]>(
+            'vscode.executeDefinitionProvider',
+            editor.document.uri,
+            position
+        );
+
+        if (definitions && definitions.length > 0) {
+            const definition = definitions[0];
+            console.log(`📍 Found definition at: ${definition.uri.fsPath}:${definition.range.start.line + 1}`);
+
+            // Open the definition file in a split editor to the right
+            const document = await vscode.workspace.openTextDocument(definition.uri);
+            const splitEditor = await vscode.window.showTextDocument(document, {
+                viewColumn: vscode.ViewColumn.Beside, // Open in split editor to the right
+                selection: definition.range,
+                preserveFocus: false
+            });
+
+            // Reveal the definition line
+            splitEditor.revealRange(definition.range, vscode.TextEditorRevealType.InCenter);
+
+            console.log(`✅ Opened ${word} definition in split editor`);
+        } else {
+            console.log(`❌ No definition found for: ${word}`);
+        }
+    } catch (error) {
+        console.error(`❌ Error opening definition in split editor:`, error);
+    }
+}
+
 export function activate(context: vscode.ExtensionContext) {
     console.log('PyTestEmbed extension is now active!');
 
@@ -37,6 +114,9 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Register folding provider for test: and doc: blocks
     registerFoldingProvider(context);
+
+    // Register double-click handler for opening definitions in split editor
+    registerDoubleClickHandler(context);
 
     // Register all commands
     registerCommands(context);

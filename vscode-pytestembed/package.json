@@ -2,7 +2,7 @@
   "name": "pytestembed",
   "displayName": "PyTestEmbed",
   "description": "Syntax highlighting and folding for PyTestEmbed embedded test and documentation blocks",
-  "version": "0.1.3",
+  "version": "0.1.5",
   "publisher": "pytestembed",
   "engines": {
     "vscode": "^1.74.0"
@@ -43,7 +43,10 @@
         "pytestembed.aiProvider": {
           "type": "string",
           "default": "lmstudio",
-          "enum": ["ollama", "lmstudio"],
+          "enum": [
+            "ollama",
+            "lmstudio"
+          ],
           "description": "AI provider for smart generation"
         }
       }
@@ -385,6 +388,7 @@
   "license": "MIT",
   "dependencies": {
     "@types/ws": "^8.18.1",
+    "vsce": "^2.15.0",
     "ws": "^8.18.2"
   }
 }

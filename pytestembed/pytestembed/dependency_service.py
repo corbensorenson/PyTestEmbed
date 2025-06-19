@@ -255,43 +255,96 @@ class DependencyService:
     
     def _find_element_by_location(self, file_path: str, element_name: str, line_number: int) -> Optional[str]:
         """Find an element by file path, name, and approximate line number."""
-        # Try exact matches first
+        # Normalize file path - try both absolute and relative paths
+        relative_path = self._get_relative_path(file_path)
+
+        # Try exact matches with both absolute and relative paths
         candidates = [
-            f"{file_path}:{element_name}",  # Global function
-            f"{file_path}:Derp.{element_name}",  # Method in Derp class (common in tests)
+            f"{file_path}:{element_name}",  # Global function (absolute path)
+            f"{relative_path}:{element_name}",  # Global function (relative path)
+            f"{file_path}:Derp.{element_name}",  # Method in Derp class (absolute path)
+            f"{relative_path}:Derp.{element_name}",  # Method in Derp class (relative path)
         ]
-        
+
+        # Also try other common class names
+        for class_name in ['Calculator', 'DataProcessor']:
+            candidates.extend([
+                f"{file_path}:{class_name}.{element_name}",
+                f"{relative_path}:{class_name}.{element_name}",
+            ])
+
+        print(f"🔍 Checking candidates: {candidates}")
         for candidate in candidates:
             if candidate in self.dependency_graph.elements:
+                print(f"🎯 Found element: {candidate}")
                 return candidate
-        
-        # Try fuzzy matching by name and file
+            else:
+                print(f"❌ Candidate not found: {candidate}")
+
+        # Try fuzzy matching by name and file (check both absolute and relative paths)
         for element_id, element in self.dependency_graph.elements.items():
-            if (element.file_path == file_path and 
+            element_file_path = element.file_path
+            if ((element_file_path == file_path or element_file_path == relative_path) and
                 element.name == element_name and
                 abs(element.line_number - line_number) <= 5):
+                print(f"🎯 Found element by fuzzy match: {element_id}")
                 return element_id
-        
+
+        print(f"❌ Element not found: {element_name} in {file_path} (relative: {relative_path})")
         return None
 
     def _find_element_by_name(self, file_path: str, element_name: str) -> Optional[str]:
         """Find an element by file path and name (for documentation lookup)."""
-        # Try exact matches first
+        # Normalize file path - try both absolute and relative paths
+        relative_path = self._get_relative_path(file_path)
+
+        # Try exact matches with both absolute and relative paths
         candidates = [
-            f"{file_path}:{element_name}",  # Global function or class
-            f"{file_path}:Derp.{element_name}",  # Method in Derp class
+            f"{file_path}:{element_name}",  # Global function or class (absolute path)
+            f"{relative_path}:{element_name}",  # Global function or class (relative path)
+            f"{file_path}:Derp.{element_name}",  # Method in Derp class (absolute path)
+            f"{relative_path}:Derp.{element_name}",  # Method in Derp class (relative path)
         ]
+
+        # Also try other common class names
+        for class_name in ['Calculator', 'DataProcessor']:
+            candidates.extend([
+                f"{file_path}:{class_name}.{element_name}",
+                f"{relative_path}:{class_name}.{element_name}",
+            ])
 
         for candidate in candidates:
             if candidate in self.dependency_graph.elements:
                 return candidate
 
-        # Try fuzzy matching by name and file
+        # Try fuzzy matching by name and file (check both absolute and relative paths)
         for element_id, element in self.dependency_graph.elements.items():
-            if element.file_path == file_path and element.name == element_name:
+            element_file_path = element.file_path
+            if ((element_file_path == file_path or element_file_path == relative_path) and
+                element.name == element_name):
                 return element_id
 
         return None
+
+    def _get_relative_path(self, file_path: str) -> str:
+        """Convert absolute path to relative path from workspace root."""
+        try:
+            abs_path = Path(file_path)
+            if abs_path.is_absolute():
+                # Try to make it relative to workspace (resolve workspace path first)
+                workspace_abs = self.workspace_path.resolve()
+                relative = abs_path.relative_to(workspace_abs)
+                result = str(relative)
+                print(f"🔄 Converted {file_path} -> {result}")
+                return result
+            else:
+                # Already relative
+                print(f"🔄 Already relative: {file_path}")
+                return file_path
+        except ValueError as e:
+            # Path is not under workspace, return as-is
+            print(f"⚠️ Could not make relative: {file_path} (workspace: {self.workspace_path.resolve()}) - {e}")
+            return file_path
 
 
 async def main():

@@ -29,7 +29,7 @@
           "name": "punctuation.separator.pytestembed"
         }
       },
-      "end": "^(?!\\1\\s+|\\s*$)",
+      "end": "^(?=\\s*(?:def\\s|class\\s|@|test:|doc:))|^(?=\\S)(?!\\s*$)",
       "name": "meta.block.test.pytestembed",
       "patterns": [
         {
@@ -47,7 +47,7 @@
           "name": "punctuation.separator.pytestembed"
         }
       },
-      "end": "^(?!\\1\\s+|\\s*$)",
+      "end": "^(?=\\s*(?:def\\s|class\\s|@|test:|doc:))|^(?=\\S)(?!\\s*$)",
       "name": "meta.block.doc.pytestembed",
       "patterns": [
         {
@@ -62,6 +62,12 @@
         },
         {
           "include": "#test-statement"
+        },
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "source.python"
         }
       ]
     },
@@ -117,9 +123,12 @@
     "doc-content": {
       "patterns": [
         {
-          "match": "^\\s*(.+)$",
+          "match": "^(\\s*)(.*)$",
           "captures": {
             "1": {
+              "name": "punctuation.whitespace.leading.pytestembed"
+            },
+            "2": {
               "name": "comment.block.documentation.pytestembed"
             }
           }

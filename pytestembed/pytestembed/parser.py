@@ -158,7 +158,7 @@ class PyTestEmbedParser:
         
         while self.current_line < len(self.lines):
             line = self.lines[self.current_line].strip()
-            
+
             if line.startswith('class '):
                 class_def = self._parse_class()
                 if class_def:
@@ -418,7 +418,7 @@ class PyTestEmbedParser:
         test_blocks = []
         doc_blocks = []
 
-        # First, parse the function body (4-space indented lines)
+        # First, parse the function body (4+ space indented lines)
         while (self.current_line < len(self.lines)):
             line = self.lines[self.current_line].strip()
             indent = self._get_indent_level(self.current_line)
@@ -428,12 +428,12 @@ class PyTestEmbedParser:
                 self.current_line += 1
                 continue
 
-            # Function body should be indented 4 spaces
-            if indent == 4:
+            # Function body should be indented 4 or more spaces
+            if indent >= 4:
                 body.append(line)
                 self.current_line += 1
             else:
-                # We've hit something that's not function body
+                # We've hit something that's not function body (0-space indented)
                 break
 
         # Now parse any test: or doc: blocks that immediately follow at 0-space indentation
@@ -501,7 +501,11 @@ class PyTestEmbedParser:
             # Only process lines with the expected indentation
             if indent == expected_indent:
                 # Check if this line contains an assertion
-                if '==' in line and ':' in line:
+                # Look for any comparison operator followed by a colon and message
+                comparison_operators = ['==', '!=', '<', '>', '<=', '>=', ' in ', ' not in ', ' is ', ' is not ']
+                has_comparison = any(op in line for op in comparison_operators)
+
+                if has_comparison and ':' in line:
                     # This is an assertion line
                     parts = line.split(':', 1)
                     if len(parts) == 2:

@@ -5,6 +5,7 @@
  */
 
 import * as vscode from 'vscode';
+import { state, decorationTypes } from './state';
 
 /**
  * Folding range provider for PyTestEmbed syntax
@@ -71,7 +72,8 @@ export function registerFoldingProvider(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(disposable);
 
-    // NO EVENT LISTENER - causes too many problems
+    // Register folding state tracker for test status icon movement
+    registerFoldingStateTracker(context);
 }
 
 /**
@@ -439,4 +441,265 @@ class CompoundFoldingProvider implements vscode.FoldingRangeProvider {
 
         return null;
     }
+}
+
+/**
+ * Track folding state changes for test status icon movement
+ */
+function registerFoldingStateTracker(context: vscode.ExtensionContext) {
+    // Track folding changes with a debounced approach
+    let updateTimeout: NodeJS.Timeout | undefined;
+
+    const disposable = vscode.window.onDidChangeTextEditorVisibleRanges((event) => {
+        const editor = event.textEditor;
+        if (!editor || !editor.document.fileName.endsWith('.py')) {
+            return;
+        }
+
+        // Debounce updates to avoid excessive processing
+        if (updateTimeout) {
+            clearTimeout(updateTimeout);
+        }
+
+        updateTimeout = setTimeout(() => {
+            updateTestStatusIconsForFolding(editor);
+        }, 100);
+    });
+
+    context.subscriptions.push(disposable);
+}
+
+/**
+ * Update test status icons based on current folding state
+ */
+async function updateTestStatusIconsForFolding(editor: vscode.TextEditor) {
+    const document = editor.document;
+    const foldedFunctions = new Set<number>();
+    const foldedClasses = new Set<number>();
+
+    // Detect which functions and classes are currently folded
+    for (let i = 0; i < document.lineCount; i++) {
+        const line = document.lineAt(i);
+        const trimmed = line.text.trim();
+
+        if (trimmed.startsWith('def ') || trimmed.startsWith('class ')) {
+            // Check if this line is folded by seeing if the next line is visible
+            const nextLineVisible = isLineVisible(editor, i + 1);
+            if (!nextLineVisible) {
+                if (trimmed.startsWith('def ')) {
+                    foldedFunctions.add(i);
+                } else {
+                    foldedClasses.add(i);
+                }
+            }
+        }
+    }
+
+    // Update decorations for folded functions
+    for (const lineNumber of foldedFunctions) {
+        await updateFunctionTestStatus(editor, lineNumber);
+    }
+
+    // Update decorations for folded classes
+    for (const lineNumber of foldedClasses) {
+        await updateClassTestStatus(editor, lineNumber);
+    }
+}
+
+/**
+ * Check if a line is currently visible (not folded)
+ */
+function isLineVisible(editor: vscode.TextEditor, lineNumber: number): boolean {
+    if (lineNumber >= editor.document.lineCount) {
+        return false;
+    }
+
+    // Check if the line is within any visible range
+    const lineRange = new vscode.Range(lineNumber, 0, lineNumber, editor.document.lineAt(lineNumber).text.length);
+    const isVisible = editor.visibleRanges.some(range => range.contains(lineRange));
+
+    console.log(`👁️ Line ${lineNumber + 1} visibility: ${isVisible}`);
+    return isVisible;
+}
+
+/**
+ * Update test status for a folded function
+ */
+async function updateFunctionTestStatus(editor: vscode.TextEditor, functionLineNumber: number) {
+    const document = editor.document;
+    const functionLine = document.lineAt(functionLineNumber);
+    const baseIndent = functionLine.firstNonWhitespaceCharacterIndex;
+
+    // Find associated test: blocks and get their status
+    let testStatus: 'pass' | 'fail' | 'running' | 'untested' = 'untested';
+
+    for (let i = functionLineNumber + 1; i < document.lineCount; i++) {
+        const line = document.lineAt(i);
+        const trimmed = line.text.trim();
+
+        // Skip empty lines
+        if (trimmed === '') continue;
+
+        // Stop if we hit another function/class at same level
+        if (line.firstNonWhitespaceCharacterIndex <= baseIndent &&
+            (trimmed.startsWith('def ') || trimmed.startsWith('class '))) {
+            break;
+        }
+
+        // Check test: blocks
+        if (trimmed === 'test:' && line.firstNonWhitespaceCharacterIndex === baseIndent) {
+            const blockStatus = getTestBlockStatus(i);
+            if (blockStatus === 'fail') {
+                testStatus = 'fail';
+                break; // Fail takes priority
+            } else if (blockStatus === 'running') {
+                testStatus = 'running';
+            } else if (blockStatus === 'pass' && testStatus === 'untested') {
+                testStatus = 'pass';
+            }
+        }
+    }
+
+    // Apply decoration to the function line
+    applyTestStatusDecoration(editor, functionLineNumber, testStatus);
+}
+
+/**
+ * Update test status for a folded class (aggregate all function tests + class tests)
+ */
+async function updateClassTestStatus(editor: vscode.TextEditor, classLineNumber: number) {
+    const document = editor.document;
+    const classLine = document.lineAt(classLineNumber);
+    const baseIndent = classLine.firstNonWhitespaceCharacterIndex;
+
+    let hasFailure = false;
+    let hasRunning = false;
+    let hasPass = false;
+
+    // Check class-level test: blocks first
+    for (let i = classLineNumber + 1; i < document.lineCount; i++) {
+        const line = document.lineAt(i);
+        const trimmed = line.text.trim();
+
+        // Skip empty lines
+        if (trimmed === '') continue;
+
+        // Stop if we hit another class at same level or less
+        if (line.firstNonWhitespaceCharacterIndex <= baseIndent &&
+            trimmed.startsWith('class ')) {
+            break;
+        }
+
+        // Check class-level test: blocks
+        if (trimmed === 'test:' && line.firstNonWhitespaceCharacterIndex === baseIndent) {
+            const blockStatus = getTestBlockStatus(i);
+            if (blockStatus === 'fail') hasFailure = true;
+            else if (blockStatus === 'running') hasRunning = true;
+            else if (blockStatus === 'pass') hasPass = true;
+        }
+
+        // Check function-level test: blocks within the class
+        if (trimmed.startsWith('def ') && line.firstNonWhitespaceCharacterIndex > baseIndent) {
+            const functionStatus = await getFunctionTestStatus(i);
+            if (functionStatus === 'fail') hasFailure = true;
+            else if (functionStatus === 'running') hasRunning = true;
+            else if (functionStatus === 'pass') hasPass = true;
+        }
+    }
+
+    // Determine aggregate status
+    let aggregateStatus: 'pass' | 'fail' | 'running' | 'untested' = 'untested';
+    if (hasFailure) {
+        aggregateStatus = 'fail';
+    } else if (hasRunning) {
+        aggregateStatus = 'running';
+    } else if (hasPass) {
+        aggregateStatus = 'pass';
+    }
+
+    // Apply decoration to the class line
+    applyTestStatusDecoration(editor, classLineNumber, aggregateStatus);
+}
+
+/**
+ * Get test status for a specific test: block
+ */
+function getTestBlockStatus(testLineNumber: number): 'pass' | 'fail' | 'running' | 'untested' {
+    // Check if we have test results for this line
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) return 'untested';
+
+    const filePath = editor.document.fileName;
+    const testResults = state.testResults.get(filePath);
+
+    if (testResults) {
+        // Find test results for this specific line
+        const lineResults = testResults.filter(result => result.line === testLineNumber);
+
+        if (lineResults.length > 0) {
+            // Check if any tests failed
+            const hasFail = lineResults.some(result => result.status === 'fail' || result.status === 'error');
+            const hasRunning = lineResults.some(result => result.status === 'running');
+            const hasPass = lineResults.some(result => result.status === 'pass');
+
+            if (hasFail) return 'fail';
+            if (hasRunning) return 'running';
+            if (hasPass) return 'pass';
+        }
+    }
+
+    // Default to untested if no results
+    return 'untested';
+}
+
+/**
+ * Get aggregate test status for a function
+ */
+async function getFunctionTestStatus(functionLineNumber: number): Promise<'pass' | 'fail' | 'running' | 'untested'> {
+    // This would use similar logic to updateFunctionTestStatus but just return the status
+    // For now, return untested - this can be expanded
+    return 'untested';
+}
+
+/**
+ * Apply test status decoration to a specific line (function/class when folded)
+ */
+function applyTestStatusDecoration(editor: vscode.TextEditor, lineNumber: number, status: 'pass' | 'fail' | 'running' | 'untested') {
+    console.log(`📍 Applying ${status} decoration to line ${lineNumber + 1}`);
+
+    // Don't clear existing decorations - let the decoration system handle it
+    // This prevents the icons from disappearing
+
+    // Apply the appropriate decoration based on status
+    const range = new vscode.Range(lineNumber, 0, lineNumber, 0);
+    const decorationOptions: vscode.DecorationOptions = {
+        range,
+        hoverMessage: `Folded test status: ${status}`
+    };
+
+    // Create a new decoration array with just this line
+    const decorations = [decorationOptions];
+
+    switch (status) {
+        case 'pass':
+            editor.setDecorations(decorationTypes.blockPassIconDecorationType, decorations);
+            break;
+        case 'fail':
+        case 'untested': // Show untested as fail (red)
+            editor.setDecorations(decorationTypes.blockFailIconDecorationType, decorations);
+            break;
+        case 'running':
+            editor.setDecorations(decorationTypes.blockRunningIconDecorationType, decorations);
+            break;
+    }
+}
+
+/**
+ * Clear decorations for a specific line (more targeted approach)
+ */
+function clearLineDecorations(editor: vscode.TextEditor, lineNumber: number) {
+    // Don't clear ALL decorations - this is too aggressive
+    // Instead, we'll let the decoration system handle overlapping decorations
+    // This function is kept for future use but currently does nothing
+    console.log(`🧹 Would clear decorations for line ${lineNumber + 1} (currently disabled)`);
 }

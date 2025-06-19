@@ -1,8 +1,48 @@
-# PyTestEmbed Project
+# PyTestEmbed
 
-🚀 **The Most Advanced Python Testing Framework** - Embed tests and documentation directly within your Python code with cutting-edge AI and predictive capabilities!
+🚀 **The Most Advanced Python Testing Framework** - Embed tests and documentation directly within your Python code with cutting-edge AI, live execution, and intelligent code analysis!
 
 PyTestEmbed revolutionizes Python development by combining embedded testing, intelligent AI assistance, live test execution, and comprehensive code analysis. It's not just a testing framework - it's an intelligent development assistant that makes developers more productive and code more reliable.
+
+## 🎯 **Complete Feature Set**
+
+### 🧪 **Advanced Testing Capabilities**
+- **Embedded test blocks** - Write tests directly within your code
+- **Multi-statement tests** - Complex test setups with variable assignments
+- **Class-level testing** - Tests that belong to entire classes
+- **Cross-file integration** - Test dependencies between modules
+- **Exception handling** - Proper error testing and validation
+- **Live test execution** - Real-time feedback as you save files
+- **Smart test selection** - Only runs tests affected by changes
+
+### 🎨 **IDE Integration**
+- **VSCode Extension** - Syntax highlighting, folding, live status indicators
+- **PyCharm Plugin** - Full IDE support with inspection suppression
+- **Test status icons** - Visual pass/fail indicators next to code
+- **Smart folding** - Collapse functions with their test/doc blocks
+- **Quick actions** - Generate tests/docs with lightbulb menus
+- **Problems integration** - Test results in IDE's Problems panel
+
+### 🤖 **AI-Powered Development**
+- **Smart test generation** - AI creates comprehensive test cases
+- **Documentation enhancement** - AI improves and structures docs
+- **Local AI support** - Works with Ollama and LMStudio
+- **Context-aware suggestions** - AI understands your codebase patterns
+- **Code conversion** - Transform existing Python files to PyTestEmbed
+
+### 🕸️ **Code Intelligence**
+- **Dependency analysis** - Maps all function and class relationships
+- **Dead code detection** - Identifies unused code across projects
+- **Cross-file navigation** - Jump between related code elements
+- **Interactive visualization** - Explore dependencies with hover tooltips
+- **Impact analysis** - Shows which tests to run when code changes
+
+### ⚡ **Live Development Experience**
+- **WebSocket integration** - Real-time communication with IDE
+- **Auto-test on save** - Tests run automatically when files change
+- **Live coverage tracking** - See test coverage update in real-time
+- **Instant feedback** - Immediate test results and error reporting
+- **MCP server support** - Integration with AI coding assistants
 
 ## 🌟 Revolutionary Features
 
@@ -125,7 +165,17 @@ pip install pytestembed
 python -m pytestembed live
 ```
 
-### 2. Create Your First PyTestEmbed File
+### 2. Explore the Full Feature Demo
+
+Check out `fullTest.py` for a comprehensive demonstration of all PyTestEmbed capabilities:
+- Complex class testing with Calculator and DataProcessor
+- Cross-file dependency integration with imports
+- Error handling and exception testing
+- Multi-statement test scenarios
+- AI-generated documentation examples
+- Integration testing patterns
+
+### 3. Create Your First PyTestEmbed File
 
 Create `example.py`:
 ```python
