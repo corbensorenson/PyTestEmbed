@@ -1,0 +1,267 @@
+<idea-plugin>
+    <id>com.pytestembed.plugin</id>
+    <name>PyTestEmbed</name>
+    <version>0.1.0</version>
+    <vendor email="team@pytestembed.dev" url="https://pytestembed.dev">PyTestEmbed Team</vendor>
+
+    <description><![CDATA[
+        <h1>PyTestEmbed Plugin for PyCharm</h1>
+        
+        <p>This plugin provides comprehensive support for PyTestEmbed embedded test and documentation blocks in PyCharm.</p>
+        
+        <h2>Features:</h2>
+        <ul>
+            <li><strong>Syntax Highlighting</strong>: Beautiful highlighting for test: and doc: blocks</li>
+            <li><strong>Code Folding</strong>: Collapse test and documentation blocks for cleaner code view</li>
+            <li><strong>Inspection Suppression</strong>: Automatically suppress linting errors in test blocks</li>
+            <li><strong>Smart Navigation</strong>: Navigate between test and implementation code</li>
+        </ul>
+        
+        <h2>PyTestEmbed Syntax:</h2>
+        <pre><code>
+class Calculator:
+    def add(self, x, y):
+        return x + y
+    test:
+        add(2, 3) == 5: "Addition failed",
+        add(-1, 1) == 0: "Addition with negative failed",
+    doc:
+        Adds two numbers together and returns the result
+        </code></pre>
+        
+        <p>For more information, visit <a href="https://pytestembed.dev">pytestembed.dev</a></p>
+    ]]></description>
+
+    <change-notes><![CDATA[
+        <h2>Version 0.1.0</h2>
+        <ul>
+            <li>Initial release</li>
+            <li>Syntax highlighting for test: and doc: blocks</li>
+            <li>Code folding support</li>
+            <li>Inspection suppression for test blocks</li>
+        </ul>
+    ]]></change-notes>
+
+    <!-- Please see https://plugins.jetbrains.com/docs/intellij/build-number-ranges.html for description -->
+    <idea-version since-build="223.0" until-build="241.*"/>
+
+    <!-- Please see https://plugins.jetbrains.com/docs/intellij/plugin-compatibility.html
+         on how to target different products -->
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.python</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- Syntax highlighting -->
+        <lang.syntaxHighlighterFactory 
+            language="Python" 
+            implementationClass="com.pytestembed.plugin.highlighting.PyTestEmbedSyntaxHighlighterFactory"/>
+        
+        <!-- Code folding -->
+        <lang.foldingBuilder 
+            language="Python" 
+            implementationClass="com.pytestembed.plugin.folding.PyTestEmbedFoldingBuilder"/>
+        
+        <!-- Inspection suppression -->
+        <inspectionToolProvider 
+            implementation="com.pytestembed.plugin.inspections.PyTestEmbedInspectionProvider"/>
+        
+        <!-- File type detection -->
+        <fileType
+            name="Python with PyTestEmbed"
+            implementationClass="com.pytestembed.plugin.PyTestEmbedFileType"
+            fieldName="INSTANCE"
+            language="Python"
+            extensions="py"/>
+
+        <!-- Tool window -->
+        <toolWindow
+            id="PyTestEmbed"
+            anchor="right"
+            factoryClass="com.pytestembed.plugin.toolwindow.PyTestEmbedToolWindowFactory"
+            icon="/icons/toolwindow.svg"/>
+
+        <!-- Status bar widget -->
+        <statusBarWidgetFactory
+            implementation="com.pytestembed.plugin.statusbar.PyTestEmbedStatusBarWidgetFactory"/>
+    </extensions>
+
+    <!-- Services -->
+    <projectService serviceImplementation="com.pytestembed.plugin.services.LiveTestService"/>
+    <projectService serviceImplementation="com.pytestembed.plugin.services.SmartGenerationService"/>
+
+    <actions>
+        <!-- Main PyTestEmbed menu group -->
+        <group id="PyTestEmbed.Menu" text="PyTestEmbed" description="PyTestEmbed actions">
+            <add-to-group group-id="CodeMenu" anchor="last"/>
+
+            <!-- Visibility toggle actions -->
+            <action id="PyTestEmbed.ToggleTestBlocks"
+                    class="com.pytestembed.plugin.actions.ToggleTestBlocksAction"
+                    text="Toggle Test Blocks"
+                    description="Toggle visibility of test: blocks in the current file"
+                    icon="/icons/test.svg">
+                <keyboard-shortcut keymap="$default" first-keystroke="ctrl shift T"/>
+            </action>
+
+            <action id="PyTestEmbed.ToggleDocBlocks"
+                    class="com.pytestembed.plugin.actions.ToggleDocBlocksAction"
+                    text="Toggle Doc Blocks"
+                    description="Toggle visibility of doc: blocks in the current file"
+                    icon="/icons/doc.svg">
+                <keyboard-shortcut keymap="$default" first-keystroke="ctrl shift D"/>
+            </action>
+
+            <action id="PyTestEmbed.ShowAllBlocks"
+                    class="com.pytestembed.plugin.actions.ShowAllBlocksAction"
+                    text="Show All Blocks"
+                    description="Show all test: and doc: blocks"
+                    icon="/icons/show.svg">
+                <keyboard-shortcut keymap="$default" first-keystroke="ctrl shift S"/>
+            </action>
+
+            <action id="PyTestEmbed.HideAllBlocks"
+                    class="com.pytestembed.plugin.actions.HideAllBlocksAction"
+                    text="Hide All Blocks"
+                    description="Hide all test: and doc: blocks"
+                    icon="/icons/hide.svg">
+                <keyboard-shortcut keymap="$default" first-keystroke="ctrl shift H"/>
+            </action>
+
+            <separator/>
+
+            <!-- Execution actions -->
+            <action id="PyTestEmbed.RunTests"
+                    class="com.pytestembed.plugin.actions.RunTestsAction"
+                    text="Run Tests"
+                    description="Run PyTestEmbed tests for the current file"
+                    icon="/icons/run-tests.svg">
+                <keyboard-shortcut keymap="$default" first-keystroke="ctrl shift R"/>
+            </action>
+
+            <action id="PyTestEmbed.GenerateDocs"
+                    class="com.pytestembed.plugin.actions.GenerateDocsAction"
+                    text="Generate Documentation"
+                    description="Generate PyTestEmbed documentation for the current file"
+                    icon="/icons/generate-docs.svg">
+                <keyboard-shortcut keymap="$default" first-keystroke="ctrl shift G"/>
+            </action>
+
+            <action id="PyTestEmbed.RunWithoutBlocks"
+                    class="com.pytestembed.plugin.actions.RunWithoutBlocksAction"
+                    text="Run Without Test/Doc Blocks"
+                    description="Run Python file ignoring test: and doc: blocks"
+                    icon="/icons/run-clean.svg">
+                <keyboard-shortcut keymap="$default" first-keystroke="ctrl shift X"/>
+            </action>
+
+            <separator/>
+
+            <!-- Live Testing Actions -->
+            <action id="PyTestEmbed.StartLiveTesting"
+                    class="com.pytestembed.plugin.actions.StartLiveTestingAction"
+                    text="Start Live Testing"
+                    description="Start PyTestEmbed live testing"
+                    icon="/icons/live-start.svg">
+                <keyboard-shortcut keymap="$default" first-keystroke="ctrl shift L"/>
+            </action>
+
+            <action id="PyTestEmbed.StopLiveTesting"
+                    class="com.pytestembed.plugin.actions.StopLiveTestingAction"
+                    text="Stop Live Testing"
+                    description="Stop PyTestEmbed live testing"
+                    icon="/icons/live-stop.svg">
+                <keyboard-shortcut keymap="$default" first-keystroke="ctrl shift alt L"/>
+            </action>
+
+            <separator/>
+
+            <!-- Smart Generation Actions -->
+            <action id="PyTestEmbed.GenerateSmartBlocks"
+                    class="com.pytestembed.plugin.actions.GenerateSmartBlocksAction"
+                    text="Generate Test &amp; Doc Blocks (AI)"
+                    description="Generate both test and documentation blocks using AI"
+                    icon="/icons/ai-generate.svg">
+                <keyboard-shortcut keymap="$default" first-keystroke="ctrl shift A"/>
+            </action>
+
+            <action id="PyTestEmbed.GenerateTestBlock"
+                    class="com.pytestembed.plugin.actions.GenerateTestBlockAction"
+                    text="Generate Test Block (AI)"
+                    description="Generate test block using AI"
+                    icon="/icons/ai-test.svg">
+                <keyboard-shortcut keymap="$default" first-keystroke="ctrl shift alt T"/>
+            </action>
+
+            <action id="PyTestEmbed.GenerateDocBlock"
+                    class="com.pytestembed.plugin.actions.GenerateDocBlockAction"
+                    text="Generate Doc Block (AI)"
+                    description="Generate documentation block using AI"
+                    icon="/icons/ai-doc.svg">
+                <keyboard-shortcut keymap="$default" first-keystroke="ctrl shift alt D"/>
+            </action>
+
+            <separator/>
+
+            <!-- Legacy actions for backward compatibility -->
+            <action id="PyTestEmbed.FoldTestBlocks"
+                    class="com.pytestembed.plugin.actions.FoldTestBlocksAction"
+                    text="Fold Test Blocks (Legacy)"
+                    description="Fold all test: blocks in the current file">
+            </action>
+
+            <action id="PyTestEmbed.FoldDocBlocks"
+                    class="com.pytestembed.plugin.actions.FoldDocBlocksAction"
+                    text="Fold Doc Blocks (Legacy)"
+                    description="Fold all doc: blocks in the current file">
+            </action>
+        </group>
+
+        <!-- Toolbar actions -->
+        <group id="PyTestEmbed.Toolbar" text="PyTestEmbed Toolbar">
+            <add-to-group group-id="MainToolBar" anchor="last"/>
+
+            <action id="PyTestEmbed.ToolbarToggleTests"
+                    class="com.pytestembed.plugin.actions.ToggleTestBlocksAction"
+                    text="Toggle Tests"
+                    description="Toggle test blocks visibility"
+                    icon="/icons/test.svg"/>
+
+            <action id="PyTestEmbed.ToolbarToggleDocs"
+                    class="com.pytestembed.plugin.actions.ToggleDocBlocksAction"
+                    text="Toggle Docs"
+                    description="Toggle doc blocks visibility"
+                    icon="/icons/doc.svg"/>
+
+            <action id="PyTestEmbed.ToolbarRunTests"
+                    class="com.pytestembed.plugin.actions.RunTestsAction"
+                    text="Run Tests"
+                    description="Run PyTestEmbed tests"
+                    icon="/icons/run-tests.svg"/>
+
+            <action id="PyTestEmbed.ToolbarGenerateDocs"
+                    class="com.pytestembed.plugin.actions.GenerateDocsAction"
+                    text="Generate Docs"
+                    description="Generate documentation"
+                    icon="/icons/generate-docs.svg"/>
+        </group>
+
+        <!-- Context menu actions -->
+        <group id="PyTestEmbed.EditorPopup" text="PyTestEmbed">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+
+            <reference ref="PyTestEmbed.ToggleTestBlocks"/>
+            <reference ref="PyTestEmbed.ToggleDocBlocks"/>
+            <separator/>
+            <reference ref="PyTestEmbed.RunTests"/>
+            <reference ref="PyTestEmbed.GenerateDocs"/>
+            <reference ref="PyTestEmbed.RunWithoutBlocks"/>
+            <separator/>
+            <reference ref="PyTestEmbed.StartLiveTesting"/>
+            <reference ref="PyTestEmbed.StopLiveTesting"/>
+            <separator/>
+            <reference ref="PyTestEmbed.GenerateSmartBlocks"/>
+            <reference ref="PyTestEmbed.GenerateTestBlock"/>
+            <reference ref="PyTestEmbed.GenerateDocBlock"/>
+        </group>
+    </actions>
+</idea-plugin>

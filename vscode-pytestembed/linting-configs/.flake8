@@ -1,0 +1,20 @@
+# Flake8 configuration for PyTestEmbed
+# This configuration helps flake8 ignore PyTestEmbed test: and doc: blocks
+
+[flake8]
+# Ignore syntax errors that might be caused by test: and doc: blocks
+extend-ignore = E999,  # syntax error
+                E901,  # SyntaxError or IndentationError
+                E902,  # IOError
+                E903,  # process timeout
+                W503,  # line break before binary operator
+                W504   # line break after binary operator
+
+# Allow longer lines in test blocks
+max-line-length = 120
+
+# Exclude common patterns that might conflict with PyTestEmbed syntax
+exclude = .git,
+          __pycache__,
+          .pytest_cache,
+          .pytestembed_temp

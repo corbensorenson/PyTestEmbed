@@ -1,0 +1,190 @@
+{
+  "PyTestEmbed Function with Test and Doc": {
+    "prefix": "pte-func",
+    "body": [
+      "def ${1:function_name}(${2:parameters}):",
+      "    ${3:# Function implementation}",
+      "    ${4:return result}",
+      "test:",
+      "    ${1:function_name}(${5:test_args}) == ${6:expected}: \"${7:Test description}\"${8:,}",
+      "    ${1:function_name}(${9:edge_case_args}) == ${10:edge_expected}: \"${11:Edge case description}\"",
+      "doc:",
+      "    ${12:Brief description of what the function does.}",
+      "    ",
+      "    Args:",
+      "        ${13:param_name} (${14:type}): ${15:Parameter description}",
+      "    ",
+      "    Returns:",
+      "        ${16:return_type}: ${17:Return value description}"
+    ],
+    "description": "Create a complete PyTestEmbed function with test and doc blocks"
+  },
+  
+  "PyTestEmbed Test Block": {
+    "prefix": "pte-test",
+    "body": [
+      "test:",
+      "    ${1:function_call}(${2:args}) == ${3:expected}: \"${4:Test description}\"${5:,}",
+      "    ${1:function_call}(${6:edge_args}) == ${7:edge_expected}: \"${8:Edge case description}\""
+    ],
+    "description": "Create a PyTestEmbed test block"
+  },
+  
+  "PyTestEmbed Doc Block": {
+    "prefix": "pte-doc",
+    "body": [
+      "doc:",
+      "    ${1:Brief description of what the function does.}",
+      "    ",
+      "    Args:",
+      "        ${2:param_name} (${3:type}): ${4:Parameter description}",
+      "    ",
+      "    Returns:",
+      "        ${5:return_type}: ${6:Return value description}"
+    ],
+    "description": "Create a PyTestEmbed doc block"
+  },
+  
+  "PyTestEmbed Test Case": {
+    "prefix": "pte-case",
+    "body": [
+      "${1:function_call}(${2:args}) == ${3:expected}: \"${4:Test description}\"${5:,}"
+    ],
+    "description": "Create a single PyTestEmbed test case"
+  },
+  
+  "PyTestEmbed Class Method": {
+    "prefix": "pte-method",
+    "body": [
+      "def ${1:method_name}(self${2:, parameters}):",
+      "    ${3:# Method implementation}",
+      "    ${4:return result}",
+      "test:",
+      "    ${5:obj} = ${6:ClassName}()",
+      "    ${5:obj}.${1:method_name}(${7:test_args}) == ${8:expected}: \"${9:Method test description}\"",
+      "doc:",
+      "    ${10:Brief description of what the method does.}",
+      "    ",
+      "    Args:",
+      "        ${11:param_name} (${12:type}): ${13:Parameter description}",
+      "    ",
+      "    Returns:",
+      "        ${14:return_type}: ${15:Return value description}"
+    ],
+    "description": "Create a PyTestEmbed class method with test and doc blocks"
+  },
+  
+  "PyTestEmbed Exception Test": {
+    "prefix": "pte-exception",
+    "body": [
+      "try:",
+      "    ${1:function_call}(${2:invalid_args})",
+      "    False: \"Should have raised ${3:ExceptionType}\"",
+      "except ${3:ExceptionType}:",
+      "    True: \"${4:Exception test description}\""
+    ],
+    "description": "Create a PyTestEmbed exception test pattern"
+  },
+  
+  "PyTestEmbed Complex Test": {
+    "prefix": "pte-complex",
+    "body": [
+      "test:",
+      "    # Setup",
+      "    ${1:setup_code}",
+      "    ",
+      "    # Test cases",
+      "    ${2:test_expression} == ${3:expected}: \"${4:Test description}\"${5:,}",
+      "    ${6:edge_case_expression} == ${7:edge_expected}: \"${8:Edge case description}\"${9:,}",
+      "    ${10:error_case_expression} == ${11:error_expected}: \"${12:Error case description}\""
+    ],
+    "description": "Create a complex PyTestEmbed test block with setup"
+  },
+  
+  "PyTestEmbed Comprehensive Doc": {
+    "prefix": "pte-doc-full",
+    "body": [
+      "doc:",
+      "    ${1:Brief description of what the function does.}",
+      "    ",
+      "    ${2:Detailed explanation of the function's behavior,}",
+      "    ${3:including any important implementation details.}",
+      "    ",
+      "    Args:",
+      "        ${4:param1} (${5:type}): ${6:Description of first parameter}",
+      "        ${7:param2} (${8:type}, optional): ${9:Description of optional parameter}. Defaults to ${10:default_value}.",
+      "    ",
+      "    Returns:",
+      "        ${11:return_type}: ${12:Description of return value and its format}",
+      "    ",
+      "    Raises:",
+      "        ${13:ExceptionType}: ${14:When this exception is raised}",
+      "    ",
+      "    Examples:",
+      "        >>> ${15:example_call}",
+      "        ${16:expected_output}"
+    ],
+    "description": "Create a comprehensive PyTestEmbed doc block with all sections"
+  },
+  
+  "PyTestEmbed Data Processing Function": {
+    "prefix": "pte-data",
+    "body": [
+      "def ${1:process_data}(${2:data}, ${3:options}=None):",
+      "    \"\"\"${4:Process data with given options.}\"\"\"",
+      "    if not ${2:data}:",
+      "        return ${5:default_return}",
+      "    ",
+      "    ${6:# Processing logic}",
+      "    return ${7:processed_data}",
+      "test:",
+      "    # Normal cases",
+      "    ${1:process_data}([${8:sample_data}]) == [${9:expected_output}]: \"${10:Normal processing}\"${11:,}",
+      "    ",
+      "    # Edge cases",
+      "    ${1:process_data}([]) == ${5:default_return}: \"${12:Empty input handling}\"${13:,}",
+      "    ${1:process_data}(None) == ${5:default_return}: \"${14:None input handling}\"",
+      "doc:",
+      "    ${4:Process data with given options.}",
+      "    ",
+      "    Args:",
+      "        ${2:data} (list): ${15:Input data to process}",
+      "        ${3:options} (dict, optional): ${16:Processing options}. Defaults to None.",
+      "    ",
+      "    Returns:",
+      "        ${17:return_type}: ${18:Processed data description}"
+    ],
+    "description": "Create a data processing function with comprehensive tests"
+  },
+  
+  "PyTestEmbed API Function": {
+    "prefix": "pte-api",
+    "body": [
+      "def ${1:api_function}(${2:request_data}):",
+      "    \"\"\"${3:Handle API request and return response.}\"\"\"",
+      "    try:",
+      "        ${4:# Validate input}",
+      "        ${5:# Process request}",
+      "        return {\"success\": True, \"data\": ${6:result}}",
+      "    except Exception as e:",
+      "        return {\"success\": False, \"error\": str(e)}",
+      "test:",
+      "    # Success cases",
+      "    result = ${1:api_function}({${7:valid_data}})",
+      "    result[\"success\"] == True: \"${8:Valid request succeeds}\"${9:,}",
+      "    ",
+      "    # Error cases",
+      "    error_result = ${1:api_function}({${10:invalid_data}})",
+      "    error_result[\"success\"] == False: \"${11:Invalid request fails}\"",
+      "doc:",
+      "    ${3:Handle API request and return response.}",
+      "    ",
+      "    Args:",
+      "        ${2:request_data} (dict): ${12:Request data containing required fields}",
+      "    ",
+      "    Returns:",
+      "        dict: Response with 'success' boolean and 'data' or 'error' field"
+    ],
+    "description": "Create an API function with error handling and tests"
+  }
+}

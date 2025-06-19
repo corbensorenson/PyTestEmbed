@@ -1,0 +1,212 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "PyTestEmbed Injection",
+  "scopeName": "pytestembed.injection",
+  "injectionSelector": "L:source.python",
+  "patterns": [
+    {
+      "include": "#pytestembed-blocks"
+    }
+  ],
+  "repository": {
+    "pytestembed-blocks": {
+      "patterns": [
+        {
+          "include": "#test-block"
+        },
+        {
+          "include": "#doc-block"
+        }
+      ]
+    },
+    "test-block": {
+      "begin": "^(\\s*)(test)(:)\\s*$",
+      "beginCaptures": {
+        "2": {
+          "name": "keyword.control.pytestembed.test"
+        },
+        "3": {
+          "name": "punctuation.separator.pytestembed"
+        }
+      },
+      "end": "^(?!\\1\\s+|\\s*$)",
+      "name": "meta.block.test.pytestembed",
+      "patterns": [
+        {
+          "include": "#test-content"
+        }
+      ]
+    },
+    "doc-block": {
+      "begin": "^(\\s*)(doc)(:)\\s*$",
+      "beginCaptures": {
+        "2": {
+          "name": "keyword.control.pytestembed.doc"
+        },
+        "3": {
+          "name": "punctuation.separator.pytestembed"
+        }
+      },
+      "end": "^(?!\\1\\s+|\\s*$)",
+      "name": "meta.block.doc.pytestembed",
+      "patterns": [
+        {
+          "include": "#doc-content"
+        }
+      ]
+    },
+    "test-content": {
+      "patterns": [
+        {
+          "include": "#test-assertion"
+        },
+        {
+          "include": "#test-statement"
+        }
+      ]
+    },
+    "test-assertion": {
+      "match": "^\\s*(.+?)\\s*(==)\\s*(.+?)\\s*(:)\\s*(\"[^\"]*\"|'[^']*')\\s*(,?)\\s*$",
+      "captures": {
+        "1": {
+          "name": "meta.expression.left.pytestembed",
+          "patterns": [
+            {
+              "include": "source.python"
+            }
+          ]
+        },
+        "2": {
+          "name": "keyword.operator.comparison.pytestembed"
+        },
+        "3": {
+          "name": "meta.expression.right.pytestembed",
+          "patterns": [
+            {
+              "include": "source.python"
+            }
+          ]
+        },
+        "4": {
+          "name": "punctuation.separator.pytestembed"
+        },
+        "5": {
+          "name": "string.quoted.pytestembed.message"
+        },
+        "6": {
+          "name": "punctuation.separator.pytestembed"
+        }
+      }
+    },
+    "test-statement": {
+      "match": "^\\s*(.+?)\\s*(,?)\\s*$",
+      "captures": {
+        "1": {
+          "name": "meta.statement.pytestembed",
+          "patterns": [
+            {
+              "include": "source.python"
+            }
+          ]
+        },
+        "2": {
+          "name": "punctuation.separator.pytestembed"
+        }
+      }
+    },
+    "doc-content": {
+      "patterns": [
+        {
+          "match": "^\\s*(.+)$",
+          "captures": {
+            "1": {
+              "name": "comment.block.documentation.pytestembed"
+            }
+          }
+        }
+      ]
+    },
+    "python-expression": {
+      "patterns": [
+        {
+          "include": "#function-call"
+        },
+        {
+          "include": "#method-call"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#operators"
+        },
+        {
+          "include": "#identifiers"
+        }
+      ]
+    },
+    "function-call": {
+      "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*(\\()",
+      "captures": {
+        "1": {
+          "name": "entity.name.function.pytestembed"
+        },
+        "2": {
+          "name": "punctuation.definition.arguments.begin.pytestembed"
+        }
+      }
+    },
+    "method-call": {
+      "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*(\\.)\\s*([a-zA-Z_][a-zA-Z0-9_]*)\\s*(\\()",
+      "captures": {
+        "1": {
+          "name": "variable.other.object.pytestembed"
+        },
+        "2": {
+          "name": "punctuation.separator.period.pytestembed"
+        },
+        "3": {
+          "name": "entity.name.function.member.pytestembed"
+        },
+        "4": {
+          "name": "punctuation.definition.arguments.begin.pytestembed"
+        }
+      }
+    },
+    "numbers": {
+      "match": "\\b\\d+(\\.\\d+)?\\b",
+      "name": "constant.numeric.pytestembed"
+    },
+    "strings": {
+      "patterns": [
+        {
+          "match": "\"[^\"]*\"",
+          "name": "string.quoted.double.pytestembed"
+        },
+        {
+          "match": "'[^']*'",
+          "name": "string.quoted.single.pytestembed"
+        }
+      ]
+    },
+    "operators": {
+      "match": "\\+|\\-|\\*|\\/|\\=\\=|\\!\\=|\\<|\\>|\\<\\=|\\>\\=",
+      "name": "keyword.operator.pytestembed"
+    },
+    "identifiers": {
+      "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*\\b",
+      "name": "variable.other.pytestembed"
+    },
+    "comments": {
+      "match": "^\\s*(#.*)$",
+      "captures": {
+        "1": {
+          "name": "comment.line.number-sign.pytestembed"
+        }
+      }
+    }
+  }
+}

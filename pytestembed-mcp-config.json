@@ -1,0 +1,35 @@
+{
+  "mcpServers": {
+    "pytestembed": {
+      "command": "python",
+      "args": ["-m", "pytestembed.mcp_server"],
+      "env": {
+        "WORKSPACE": "."
+      },
+      "description": "PyTestEmbed MCP Server - Provides testing and documentation capabilities for Python code",
+      "capabilities": {
+        "tools": [
+          "run_tests",
+          "run_test_at_line", 
+          "generate_test_block",
+          "generate_doc_block",
+          "generate_both_blocks",
+          "parse_file",
+          "validate_syntax",
+          "convert_to_pytestembed"
+        ],
+        "resources": [
+          "workspace",
+          "config", 
+          "test_status"
+        ]
+      },
+      "settings": {
+        "workspace_path": ".",
+        "live_test_port": 8765,
+        "mcp_port": 3001,
+        "ai_provider": "lmstudio"
+      }
+    }
+  }
+}

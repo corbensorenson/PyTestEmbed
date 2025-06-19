@@ -1,0 +1,22 @@
+# PyLint configuration for PyTestEmbed
+# This configuration helps pylint ignore PyTestEmbed test: and doc: blocks
+
+[MESSAGES CONTROL]
+# Disable syntax errors that might be caused by test: and doc: blocks
+disable=syntax-error,
+        invalid-syntax,
+        unexpected-indent,
+        unindented-block
+
+[FORMAT]
+# Allow longer lines in test blocks
+max-line-length=120
+
+[BASIC]
+# Allow test: and doc: as valid names
+good-names=test,doc
+
+[DESIGN]
+# Allow more complex test expressions
+max-args=10
+max-locals=20

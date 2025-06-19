@@ -1,0 +1,160 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "PyTestEmbed Injection",
+  "scopeName": "pytestembed.injection",
+  "injectionSelector": "L:source.python",
+  "patterns": [
+    {
+      "include": "#pytestembed-test-block"
+    },
+    {
+      "include": "#pytestembed-doc-block"
+    }
+  ],
+  "repository": {
+    "pytestembed-test-block": {
+      "name": "meta.test-block.pytestembed",
+      "begin": "^(\\s*)(test)(:)\\s*$",
+      "end": "^(?=\\s*(?:def\\s|class\\s|@|test:|doc:|$))|^(?=\\S)",
+      "beginCaptures": {
+        "2": {
+          "name": "keyword.control.test.pytestembed"
+        },
+        "3": {
+          "name": "punctuation.separator.colon.pytestembed"
+        }
+      },
+
+      "patterns": [
+        {
+          "include": "#test-content"
+        }
+      ]
+    },
+    "pytestembed-doc-block": {
+      "name": "meta.doc-block.pytestembed",
+      "begin": "^(\\s*)(doc)(:)\\s*$",
+      "end": "^(?=\\s*(?:def\\s|class\\s|@|test:|doc:|$))|^(?=\\S)",
+      "beginCaptures": {
+        "2": {
+          "name": "keyword.control.doc.pytestembed"
+        },
+        "3": {
+          "name": "punctuation.separator.colon.pytestembed"
+        }
+      },
+      "contentName": "comment.block.pytestembed.doc",
+      "patterns": [
+        {
+          "include": "#doc-content"
+        }
+      ]
+    },
+    "test-content": {
+      "patterns": [
+        {
+          "name": "meta.test-case.pytestembed",
+          "match": "^\\s*(.+?)\\s*(==|!=|<=|>=|<|>|\\s+is\\s+|\\s+in\\s+)\\s*(.+?)\\s*:\\s*([\"'])(.*?)\\4\\s*,?\\s*$",
+          "captures": {
+            "1": {
+              "patterns": [
+                {
+                  "include": "source.python"
+                }
+              ]
+            },
+            "2": {
+              "name": "keyword.operator.comparison.python"
+            },
+            "3": {
+              "patterns": [
+                {
+                  "include": "source.python"
+                }
+              ]
+            },
+            "4": {
+              "name": "punctuation.definition.string.begin.python"
+            },
+            "5": {
+              "name": "string.quoted.double.python"
+            }
+          }
+        },
+        {
+          "name": "meta.test-statement.pytestembed",
+          "match": "^\\s*(.+?)\\s*:\\s*([\"'])(.*?)\\2\\s*,?\\s*$",
+          "captures": {
+            "1": {
+              "patterns": [
+                {
+                  "include": "source.python"
+                }
+              ]
+            },
+            "2": {
+              "name": "punctuation.definition.string.begin.python"
+            },
+            "3": {
+              "name": "string.quoted.double.python"
+            }
+          }
+        },
+        {
+          "name": "comment.line.number-sign.python",
+          "match": "^\\s*(#.*)$"
+        },
+        {
+          "include": "source.python"
+        }
+      ]
+    },
+    "doc-content": {
+      "patterns": [
+        {
+          "name": "markup.heading.doc-section.pytestembed",
+          "match": "^\\s*(Args|Arguments|Parameters|Param|Returns?|Return|Yields?|Yield|Raises?|Raise|Examples?|Example|Note|Notes|See Also|References?)\\s*:\\s*$"
+        },
+        {
+          "name": "markup.list.doc-parameter.pytestembed",
+          "match": "^\\s*(\\w+)\\s*(\\([^)]+\\))?\\s*:\\s*(.*)$",
+          "captures": {
+            "1": {
+              "name": "variable.parameter.doc.pytestembed"
+            },
+            "2": {
+              "name": "storage.type.doc.pytestembed"
+            },
+            "3": {
+              "name": "string.unquoted.doc-description.pytestembed"
+            }
+          }
+        },
+        {
+          "name": "markup.raw.code.pytestembed",
+          "begin": "^\\s*(>>>)\\s*",
+          "end": "$",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.definition.prompt.pytestembed"
+            }
+          },
+          "patterns": [
+            {
+              "include": "source.python"
+            }
+          ]
+        },
+        {
+          "name": "comment.block.documentation.pytestembed",
+          "match": "^\\s*(.+)$",
+          "captures": {
+            "1": {
+              "name": "string.unquoted.doc.pytestembed"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

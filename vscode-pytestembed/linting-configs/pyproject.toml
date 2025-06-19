@@ -1,0 +1,53 @@
+# PyProject.toml configuration for PyTestEmbed
+# This configuration helps various tools handle PyTestEmbed test: and doc: blocks
+
+[tool.black]
+# Black configuration
+line-length = 120
+target-version = ['py38']
+extend-exclude = '''
+/(
+    \.pytestembed_temp
+)/
+'''
+
+[tool.isort]
+# isort configuration
+profile = "black"
+line_length = 120
+skip_glob = [
+    ".pytestembed_temp/*"
+]
+
+[tool.pylint.messages_control]
+# Pylint configuration
+disable = [
+    "syntax-error",
+    "invalid-syntax", 
+    "unexpected-indent",
+    "unindented-block"
+]
+
+[tool.pylint.format]
+max-line-length = 120
+
+[tool.mypy]
+# MyPy configuration
+ignore_errors = true
+allow_untyped_defs = true
+allow_incomplete_defs = true
+disallow_untyped_defs = false
+allow_any_expr = true
+exclude = [
+    "\.pytestembed_temp/"
+]
+
+[tool.pytest.ini_options]
+# Pytest configuration
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+addopts = "-v --tb=short"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning"
+]

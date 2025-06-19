@@ -1,0 +1,30 @@
+{
+    "python.analysis.diagnosticMode": "workspace",
+    "python.analysis.typeCheckingMode": "basic",
+    "python.analysis.diagnosticSeverityOverrides": {
+        "reportUndefinedVariable": "none",
+        "reportUnusedVariable": "information",
+        "reportUnusedImport": "information",
+        "reportMissingImports": "warning",
+        "reportOptionalMemberAccess": "none",
+        "reportOptionalSubscript": "none",
+        "reportOptionalIterable": "none",
+        "reportOptionalContextManager": "none",
+        "reportOptionalOperand": "none",
+        "reportTypedDictNotRequiredAccess": "none",
+        "reportPrivateImportUsage": "none",
+        "reportConstantRedefinition": "none",
+        "reportIncompatibleMethodOverride": "none",
+        "reportIncompatibleVariableOverride": "none",
+        "reportOverlappingOverload": "none",
+        "reportGeneralTypeIssues": "none",
+        "reportSyntaxError": "none"
+    },
+    "python.linting.enabled": true,
+    "python.linting.pylintEnabled": false,
+    "python.linting.flake8Enabled": true,
+    "python.linting.flake8Args": [
+        "--extend-ignore=E999,E701,E702,E703,E704,E711,E712,E713,E714,E721,E722,E731,E741,E742,E743,W503,W504",
+        "--max-line-length=88"
+    ]
+}

@@ -1,0 +1,390 @@
+{
+  "name": "pytestembed",
+  "displayName": "PyTestEmbed",
+  "description": "Syntax highlighting and folding for PyTestEmbed embedded test and documentation blocks",
+  "version": "0.1.1",
+  "publisher": "pytestembed",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Testing",
+    "Other"
+  ],
+  "keywords": [
+    "python",
+    "testing",
+    "documentation",
+    "embedded",
+    "unittest"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "PyTestEmbed",
+      "properties": {
+        "pytestembed.suppressSyntaxErrors": {
+          "type": "boolean",
+          "default": true,
+          "description": "Suppress Python syntax errors in test: and doc: blocks"
+        },
+        "pytestembed.autoConfigureLinter": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically configure Python linter for PyTestEmbed syntax"
+        },
+        "pytestembed.pythonInterpreter": {
+          "type": "string",
+          "default": "python",
+          "description": "Path to Python interpreter for live testing and PyTestEmbed commands"
+        },
+        "pytestembed.aiProvider": {
+          "type": "string",
+          "default": "lmstudio",
+          "enum": ["ollama", "lmstudio"],
+          "description": "AI provider for smart generation"
+        }
+      }
+    },
+    "languages": [
+      {
+        "id": "python",
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "scopeName": "pytestembed.injection",
+        "path": "./pytestembed-python.tmLanguage.json",
+        "injectTo": [
+          "source.python"
+        ]
+      }
+    ],
+    "commands": [
+      {
+        "command": "pytestembed.toggleTestBlocks",
+        "title": "Toggle Test Blocks",
+        "category": "PyTestEmbed",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "pytestembed.toggleDocBlocks",
+        "title": "Toggle Doc Blocks",
+        "category": "PyTestEmbed",
+        "icon": "$(book)"
+      },
+      {
+        "command": "pytestembed.showAllBlocks",
+        "title": "Show All Blocks",
+        "category": "PyTestEmbed",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "pytestembed.hideAllBlocks",
+        "title": "Hide All Blocks",
+        "category": "PyTestEmbed",
+        "icon": "$(eye-closed)"
+      },
+      {
+        "command": "pytestembed.runTests",
+        "title": "Run Tests",
+        "category": "PyTestEmbed",
+        "icon": "$(play)"
+      },
+      {
+        "command": "pytestembed.generateDocs",
+        "title": "Generate Documentation",
+        "category": "PyTestEmbed",
+        "icon": "$(file-text)"
+      },
+      {
+        "command": "pytestembed.runWithoutBlocks",
+        "title": "Run Without Test/Doc Blocks",
+        "category": "PyTestEmbed",
+        "icon": "$(run)"
+      },
+      {
+        "command": "pytestembed.configureLinter",
+        "title": "Configure Python Linter for PyTestEmbed",
+        "category": "PyTestEmbed",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "pytestembed.openOutputPanel",
+        "title": "Open PyTestEmbed Output",
+        "category": "PyTestEmbed",
+        "icon": "$(output)"
+      },
+      {
+        "command": "pytestembed.foldTestBlocks",
+        "title": "Fold Test Blocks (Legacy)",
+        "category": "PyTestEmbed"
+      },
+      {
+        "command": "pytestembed.foldDocBlocks",
+        "title": "Fold Doc Blocks (Legacy)",
+        "category": "PyTestEmbed"
+      },
+      {
+        "command": "pytestembed.generateBlocks",
+        "title": "Generate Test & Doc Blocks (AI)",
+        "category": "PyTestEmbed",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "pytestembed.generateTestsOnly",
+        "title": "Generate Test Block (AI)",
+        "category": "PyTestEmbed",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "pytestembed.generateDocsOnly",
+        "title": "Generate Doc Block (AI)",
+        "category": "PyTestEmbed",
+        "icon": "$(book)"
+      },
+      {
+        "command": "pytestembed.startLiveTesting",
+        "title": "Start Live Testing",
+        "category": "PyTestEmbed",
+        "icon": "$(play)"
+      },
+      {
+        "command": "pytestembed.stopLiveTesting",
+        "title": "Stop Live Testing",
+        "category": "PyTestEmbed",
+        "icon": "$(stop)"
+      },
+      {
+        "command": "pytestembed.toggleLiveTesting",
+        "title": "Toggle Live Testing",
+        "category": "PyTestEmbed",
+        "icon": "$(debug-alt)"
+      },
+      {
+        "command": "pytestembed.startMcpServer",
+        "title": "Start MCP Server",
+        "category": "PyTestEmbed",
+        "icon": "$(server-process)"
+      },
+      {
+        "command": "pytestembed.stopMcpServer",
+        "title": "Stop MCP Server",
+        "category": "PyTestEmbed",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "pytestembed.toggleMcpServer",
+        "title": "Toggle MCP Server",
+        "category": "PyTestEmbed",
+        "icon": "$(server-environment)"
+      },
+      {
+        "command": "pytestembed.openPanel",
+        "title": "Open PyTestEmbed Panel",
+        "category": "PyTestEmbed",
+        "icon": "$(output)"
+      },
+      {
+        "command": "pytestembed.runIgnoringTests",
+        "title": "Run Python File (Ignore Tests/Docs)",
+        "category": "PyTestEmbed",
+        "icon": "$(play)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "pytestembed.toggleTestBlocks",
+        "key": "ctrl+shift+t",
+        "mac": "cmd+shift+t",
+        "when": "editorTextFocus && resourceExtname == .py"
+      },
+      {
+        "command": "pytestembed.toggleDocBlocks",
+        "key": "ctrl+shift+d",
+        "mac": "cmd+shift+d",
+        "when": "editorTextFocus && resourceExtname == .py"
+      },
+      {
+        "command": "pytestembed.runTests",
+        "key": "ctrl+shift+r",
+        "mac": "cmd+shift+r",
+        "when": "editorTextFocus && resourceExtname == .py"
+      },
+      {
+        "command": "pytestembed.generateDocs",
+        "key": "ctrl+shift+g",
+        "mac": "cmd+shift+g",
+        "when": "editorTextFocus && resourceExtname == .py"
+      },
+      {
+        "command": "pytestembed.runWithoutBlocks",
+        "key": "ctrl+shift+x",
+        "mac": "cmd+shift+x",
+        "when": "editorTextFocus && resourceExtname == .py"
+      },
+      {
+        "command": "pytestembed.showAllBlocks",
+        "key": "ctrl+shift+s",
+        "mac": "cmd+shift+s",
+        "when": "editorTextFocus && resourceExtname == .py"
+      },
+      {
+        "command": "pytestembed.hideAllBlocks",
+        "key": "ctrl+shift+h",
+        "mac": "cmd+shift+h",
+        "when": "editorTextFocus && resourceExtname == .py"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "submenu": "pytestembed.context",
+          "when": "resourceExtname == .py",
+          "group": "pytestembed"
+        }
+      ],
+      "pytestembed.context": [
+        {
+          "command": "pytestembed.toggleTestBlocks",
+          "group": "visibility@1"
+        },
+        {
+          "command": "pytestembed.toggleDocBlocks",
+          "group": "visibility@2"
+        },
+        {
+          "command": "pytestembed.showAllBlocks",
+          "group": "visibility@3"
+        },
+        {
+          "command": "pytestembed.hideAllBlocks",
+          "group": "visibility@4"
+        },
+        {
+          "command": "pytestembed.runTests",
+          "group": "execution@1"
+        },
+        {
+          "command": "pytestembed.generateDocs",
+          "group": "execution@2"
+        },
+        {
+          "command": "pytestembed.runWithoutBlocks",
+          "group": "execution@3"
+        },
+        {
+          "command": "pytestembed.generateBlocks",
+          "group": "generation@1"
+        },
+        {
+          "command": "pytestembed.generateTestsOnly",
+          "group": "generation@2"
+        },
+        {
+          "command": "pytestembed.generateDocsOnly",
+          "group": "generation@3"
+        },
+        {
+          "command": "pytestembed.toggleLiveTesting",
+          "group": "live@1"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "pytestembed.runTests",
+          "when": "resourceExtname == .py",
+          "group": "navigation@1"
+        },
+        {
+          "command": "pytestembed.runIgnoringTests",
+          "when": "resourceExtname == .py",
+          "group": "navigation@2"
+        },
+        {
+          "command": "pytestembed.generateDocs",
+          "when": "resourceExtname == .py",
+          "group": "navigation@3"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "pytestembed.runTests",
+          "when": "view == pytestembedView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "pytestembed.generateDocs",
+          "when": "view == pytestembedView",
+          "group": "navigation@2"
+        }
+      ]
+    },
+    "submenus": [
+      {
+        "id": "pytestembed.context",
+        "label": "PyTestEmbed"
+      }
+    ],
+    "views": {
+      "explorer": [
+        {
+          "id": "pytestembedView",
+          "name": "PyTestEmbed",
+          "when": "workspaceHasFiles",
+          "icon": "$(beaker)"
+        }
+      ],
+      "pytestembedPanel": [
+        {
+          "id": "pytestembedLiveServer",
+          "name": "Live Server",
+          "when": "true"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "pytestembed",
+          "title": "PyTestEmbed",
+          "icon": "$(beaker)"
+        }
+      ],
+      "panel": [
+        {
+          "id": "pytestembedPanel",
+          "title": "PyTestEmbed",
+          "icon": "$(beaker)"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "16.x",
+    "@types/vscode": "^1.74.0",
+    "@vscode/vsce": "^3.5.0",
+    "typescript": "^4.9.4"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pytestembed/vscode-pytestembed.git"
+  },
+  "bugs": {
+    "url": "https://github.com/pytestembed/vscode-pytestembed/issues"
+  },
+  "homepage": "https://github.com/pytestembed/vscode-pytestembed#readme",
+  "license": "MIT",
+  "dependencies": {
+    "@types/ws": "^8.18.1",
+    "ws": "^8.18.2"
+  }
+}

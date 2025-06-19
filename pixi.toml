@@ -1,0 +1,144 @@
+[project]
+name = "pytestembed"
+version = "0.1.0"
+description = "Embedded testing and documentation framework for Python"
+authors = ["PyTestEmbed Team <team@pytestembed.dev>"]
+channels = ["conda-forge"]
+platforms = ["win-64", "linux-64", "osx-64", "osx-arm64"]
+
+[dependencies]
+python = ">=3.8,<4.0"
+textx = ">=4.0.0"
+click = ">=8.0.0"
+requests = ">=2.25.0"
+
+[pypi-dependencies]
+pytestembed = { path = "./pytestembed", editable = true }
+
+[tasks]
+# Development tasks
+install = "pip install -e ./pytestembed"
+test = "python -m pytest pytestembed/tests/ -v"
+test-coverage = "python -m pytest pytestembed/tests/ --cov=pytestembed --cov-report=html"
+lint = "python -m flake8 pytestembed/pytestembed/"
+format = "python -m black pytestembed/pytestembed/"
+type-check = "python -m mypy pytestembed/pytestembed/"
+
+# PyTestEmbed specific tasks
+demo = "python demo_complete_workflow.py"
+demo-conversion = "python demo_conversion_workflow.py"
+demo-ide = "python demo_ide_extensions.py"
+
+# Example tasks
+example-test = "python -m pytestembed --test pytestembed/tests/examples/derp.py"
+example-doc = "python -m pytestembed --doc pytestembed/tests/examples/derp.py"
+example-convert = "python -m pytestembed --convert pytestembed/test_conversion_example.py --no-ai --output converted_example.py"
+
+# AI-powered tasks (require Ollama or LMStudio)
+convert-ai-ollama = "python -m pytestembed --convert pytestembed/test_conversion_example.py --ai-provider ollama --output converted_ai_ollama.py"
+convert-ai-lmstudio = "python -m pytestembed --convert pytestembed/test_conversion_example.py --ai-provider lmstudio --output converted_ai_lmstudio.py"
+
+# IDE extension development
+build-vscode = { cmd = "npm run compile", cwd = "vscode-pytestembed" }
+build-pycharm = { cmd = "./gradlew build", cwd = "pycharm-pytestembed" }
+test-vscode = { cmd = "npm test", cwd = "vscode-pytestembed" }
+test-pycharm = { cmd = "./gradlew test", cwd = "pycharm-pytestembed" }
+
+# Documentation tasks
+docs-syntax = "echo 'Syntax guide available at syntaxGuide.md'"
+docs-basic = "echo 'Basic guide available at basicGuide.md'"
+docs-readme = "echo 'Full documentation available at README.md'"
+
+# Clean tasks
+clean = "rm -rf pytestembed/build pytestembed/dist pytestembed/*.egg-info"
+clean-cache = "rm -rf pytestembed/.pytestembed_cache"
+clean-temp = "rm -rf pytestembed/.pytestembed_temp"
+clean-all = ["clean", "clean-cache", "clean-temp"]
+
+# Package tasks
+build = "python -m build pytestembed/"
+publish-test = "python -m twine upload --repository testpypi pytestembed/dist/*"
+publish = "python -m twine upload pytestembed/dist/*"
+
+[feature.dev.dependencies]
+pytest = ">=7.0.0"
+pytest-cov = ">=4.0.0"
+black = ">=22.0.0"
+flake8 = ">=5.0.0"
+mypy = ">=1.0.0"
+build = ">=0.8.0"
+twine = ">=4.0.0"
+
+[feature.ai.dependencies]
+# Optional AI dependencies for enhanced conversion
+# These are not required for basic PyTestEmbed functionality
+
+[environments]
+default = ["dev"]
+ai = ["dev", "ai"]
+minimal = []
+
+# Environment-specific tasks
+[feature.dev.tasks]
+setup-dev = [
+    "pip install -e ./pytestembed[dev]",
+    "echo 'Development environment ready!'",
+    "echo 'Run: pixi run test'",
+    "echo 'Run: pixi run demo'"
+]
+
+[feature.ai.tasks]
+setup-ai = [
+    "echo 'AI features require Ollama or LMStudio'",
+    "echo 'Ollama: curl -fsSL https://ollama.ai/install.sh | sh'",
+    "echo 'Then: ollama pull codellama'",
+    "echo 'LMStudio: Download from https://lmstudio.ai/'"
+]
+
+check-ai = [
+    "python -c 'from pytestembed.ai_integration import get_ai_manager; print(f\"AI providers available: {get_ai_manager().list_available_providers()}\")'",
+]
+
+# Project-specific environment variables
+[project.env]
+PYTESTEMBED_CACHE_DIR = ".pytestembed_cache"
+PYTESTEMBED_TEMP_DIR = ".pytestembed_temp"
+PYTESTEMBED_OLLAMA_URL = "http://localhost:11434"
+PYTESTEMBED_OLLAMA_MODEL = "codellama"
+PYTESTEMBED_LMSTUDIO_URL = "http://localhost:1234"
+PYTESTEMBED_LMSTUDIO_MODEL = "local-model"
+
+# Development workflow shortcuts
+[feature.dev.tasks.workflow]
+# Complete development workflow
+full-test = [
+    "test",
+    "example-test", 
+    "example-doc",
+    "demo"
+]
+
+# Quick development cycle
+quick = [
+    "format",
+    "lint", 
+    "test"
+]
+
+# Release preparation
+pre-release = [
+    "clean-all",
+    "format",
+    "lint",
+    "type-check", 
+    "test-coverage",
+    "build"
+]
+
+# IDE development workflow
+ide-dev = [
+    "build-vscode",
+    "build-pycharm",
+    "test-vscode",
+    "test-pycharm"
+]

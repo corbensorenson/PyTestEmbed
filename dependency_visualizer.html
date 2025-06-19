@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PyTestEmbed Dependency Graph</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #1e1e1e;
+            color: #ffffff;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            align-items: center;
+        }
+        
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        
+        label {
+            font-size: 12px;
+            color: #cccccc;
+        }
+        
+        input, select, button {
+            padding: 8px 12px;
+            border: 1px solid #444;
+            border-radius: 4px;
+            background-color: #2d2d2d;
+            color: #ffffff;
+            font-size: 14px;
+        }
+        
+        button {
+            background-color: #007acc;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        
+        button:hover {
+            background-color: #005a9e;
+        }
+        
+        .graph-container {
+            border: 1px solid #444;
+            border-radius: 8px;
+            background-color: #252526;
+            position: relative;
+            height: 600px;
+            overflow: hidden;
+        }
+        
+        .info-panel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background-color: #2d2d2d;
+            border: 1px solid #444;
+            border-radius: 4px;
+            padding: 15px;
+            max-width: 300px;
+            display: none;
+        }
+        
+        .info-panel h3 {
+            margin: 0 0 10px 0;
+            color: #ffffff;
+        }
+        
+        .info-panel p {
+            margin: 5px 0;
+            font-size: 12px;
+            color: #cccccc;
+        }
+        
+        .legend {
+            display: flex;
+            gap: 20px;
+            margin-top: 20px;
+            justify-content: center;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .legend-color {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+        }
+        
+        .node {
+            cursor: pointer;
+            stroke: #fff;
+            stroke-width: 1.5px;
+        }
+        
+        .node.function { fill: #4CAF50; }
+        .node.class { fill: #2196F3; }
+        .node.method { fill: #FF9800; }
+        .node.dead-code { fill: #f44336; }
+        .node.has-tests { stroke: #00ff00; stroke-width: 3px; }
+        
+        .link {
+            stroke: #999;
+            stroke-opacity: 0.6;
+            stroke-width: 1px;
+        }
+        
+        .link.calls { stroke: #4CAF50; }
+        .link.inherits { stroke: #2196F3; }
+        .link.tests { stroke: #FF9800; }
+        
+        .node-label {
+            font-size: 10px;
+            fill: #ffffff;
+            text-anchor: middle;
+            pointer-events: none;
+        }
+        
+        .tooltip {
+            position: absolute;
+            background-color: #2d2d2d;
+            border: 1px solid #444;
+            border-radius: 4px;
+            padding: 8px;
+            font-size: 12px;
+            pointer-events: none;
+            z-index: 1000;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🕸️ PyTestEmbed Dependency Graph</h1>
+            <p>Interactive visualization of code dependencies and relationships</p>
+        </div>
+        
+        <div class="controls">
+            <div class="control-group">
+                <label for="fileInput">Load Graph Data:</label>
+                <input type="file" id="fileInput" accept=".json">
+            </div>
+            
+            <div class="control-group">
+                <label for="filterType">Filter by Type:</label>
+                <select id="filterType">
+                    <option value="all">All Elements</option>
+                    <option value="function">Functions Only</option>
+                    <option value="class">Classes Only</option>
+                    <option value="method">Methods Only</option>
+                    <option value="dead-code">Dead Code Only</option>
+                </select>
+            </div>
+            
+            <div class="control-group">
+                <label for="searchInput">Search:</label>
+                <input type="text" id="searchInput" placeholder="Search elements...">
+            </div>
+            
+            <button id="resetZoom">Reset Zoom</button>
+            <button id="exportGraph">Export PNG</button>
+        </div>
+        
+        <div class="graph-container">
+            <svg id="graph"></svg>
+            <div class="info-panel" id="infoPanel">
+                <h3 id="infoTitle">Element Info</h3>
+                <p id="infoType"></p>
+                <p id="infoFile"></p>
+                <p id="infoLine"></p>
+                <p id="infoDependencies"></p>
+                <p id="infoDependents"></p>
+            </div>
+        </div>
+        
+        <div class="tooltip" id="tooltip"></div>
+        
+        <div class="legend">
+            <div class="legend-item">
+                <div class="legend-color" style="background-color: #4CAF50;"></div>
+                <span>Functions</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background-color: #2196F3;"></div>
+                <span>Classes</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background-color: #FF9800;"></div>
+                <span>Methods</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background-color: #f44336;"></div>
+                <span>Dead Code</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background-color: transparent; border: 2px solid #00ff00;"></div>
+                <span>Has Tests</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class DependencyGraphVisualizer {
+            constructor() {
+                this.svg = d3.select("#graph");
+                this.container = this.svg.append("g");
+                this.simulation = null;
+                this.data = null;
+                this.nodes = [];
+                this.links = [];
+                
+                this.setupZoom();
+                this.setupEventListeners();
+            }
+            
+            setupZoom() {
+                const zoom = d3.zoom()
+                    .scaleExtent([0.1, 4])
+                    .on("zoom", (event) => {
+                        this.container.attr("transform", event.transform);
+                    });
+                
+                this.svg.call(zoom);
+                this.zoom = zoom;
+            }
+            
+            setupEventListeners() {
+                document.getElementById('fileInput').addEventListener('change', (e) => {
+                    this.loadGraphData(e.target.files[0]);
+                });
+                
+                document.getElementById('filterType').addEventListener('change', (e) => {
+                    this.filterGraph(e.target.value);
+                });
+                
+                document.getElementById('searchInput').addEventListener('input', (e) => {
+                    this.searchElements(e.target.value);
+                });
+                
+                document.getElementById('resetZoom').addEventListener('click', () => {
+                    this.resetZoom();
+                });
+                
+                document.getElementById('exportGraph').addEventListener('click', () => {
+                    this.exportGraph();
+                });
+            }
+            
+            loadGraphData(file) {
+                if (!file) return;
+                
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        this.data = JSON.parse(e.target.result);
+                        this.renderGraph();
+                    } catch (error) {
+                        alert('Error loading graph data: ' + error.message);
+                    }
+                };
+                reader.readAsText(file);
+            }
+            
+            renderGraph() {
+                if (!this.data) return;
+                
+                // Clear existing graph
+                this.container.selectAll("*").remove();
+                
+                // Prepare nodes and links
+                this.prepareData();
+                
+                // Create force simulation
+                this.createSimulation();
+                
+                // Render links
+                this.renderLinks();
+                
+                // Render nodes
+                this.renderNodes();
+                
+                // Start simulation
+                this.simulation.nodes(this.nodes);
+                this.simulation.force("link").links(this.links);
+                this.simulation.alpha(1).restart();
+            }
+            
+            prepareData() {
+                // Convert elements to nodes
+                this.nodes = Object.entries(this.data.elements).map(([id, element]) => ({
+                    id: id,
+                    name: element.name,
+                    type: element.type,
+                    file: element.file,
+                    line: element.line,
+                    parent_class: element.parent_class,
+                    has_tests: element.has_tests,
+                    x: Math.random() * 800,
+                    y: Math.random() * 600
+                }));
+                
+                // Convert edges to links
+                this.links = this.data.edges.map(edge => ({
+                    source: edge.from,
+                    target: edge.to,
+                    type: edge.type,
+                    line: edge.line
+                }));
+            }
+            
+            createSimulation() {
+                const width = 800;
+                const height = 600;
+                
+                this.simulation = d3.forceSimulation()
+                    .force("link", d3.forceLink().id(d => d.id).distance(100))
+                    .force("charge", d3.forceManyBody().strength(-300))
+                    .force("center", d3.forceCenter(width / 2, height / 2))
+                    .force("collision", d3.forceCollide().radius(20));
+            }
+            
+            renderLinks() {
+                const link = this.container.append("g")
+                    .selectAll("line")
+                    .data(this.links)
+                    .enter().append("line")
+                    .attr("class", d => `link ${d.type}`)
+                    .attr("stroke-width", d => d.type === 'tests' ? 2 : 1);
+                
+                this.linkElements = link;
+            }
+            
+            renderNodes() {
+                const node = this.container.append("g")
+                    .selectAll("circle")
+                    .data(this.nodes)
+                    .enter().append("circle")
+                    .attr("class", d => `node ${d.type} ${d.has_tests ? 'has-tests' : ''}`)
+                    .attr("r", d => d.type === 'class' ? 12 : 8)
+                    .call(this.drag());
+                
+                // Add labels
+                const labels = this.container.append("g")
+                    .selectAll("text")
+                    .data(this.nodes)
+                    .enter().append("text")
+                    .attr("class", "node-label")
+                    .text(d => d.name);
+                
+                // Add event listeners
+                node.on("click", (event, d) => this.showElementInfo(d))
+                    .on("mouseover", (event, d) => this.showTooltip(event, d))
+                    .on("mouseout", () => this.hideTooltip());
+                
+                this.nodeElements = node;
+                this.labelElements = labels;
+                
+                // Update positions on simulation tick
+                this.simulation.on("tick", () => {
+                    this.linkElements
+                        .attr("x1", d => d.source.x)
+                        .attr("y1", d => d.source.y)
+                        .attr("x2", d => d.target.x)
+                        .attr("y2", d => d.target.y);
+                    
+                    this.nodeElements
+                        .attr("cx", d => d.x)
+                        .attr("cy", d => d.y);
+                    
+                    this.labelElements
+                        .attr("x", d => d.x)
+                        .attr("y", d => d.y + 4);
+                });
+            }
+            
+            drag() {
+                return d3.drag()
+                    .on("start", (event, d) => {
+                        if (!event.active) this.simulation.alphaTarget(0.3).restart();
+                        d.fx = d.x;
+                        d.fy = d.y;
+                    })
+                    .on("drag", (event, d) => {
+                        d.fx = event.x;
+                        d.fy = event.y;
+                    })
+                    .on("end", (event, d) => {
+                        if (!event.active) this.simulation.alphaTarget(0);
+                        d.fx = null;
+                        d.fy = null;
+                    });
+            }
+            
+            showElementInfo(element) {
+                const panel = document.getElementById('infoPanel');
+                document.getElementById('infoTitle').textContent = element.name;
+                document.getElementById('infoType').textContent = `Type: ${element.type}`;
+                document.getElementById('infoFile').textContent = `File: ${element.file}`;
+                document.getElementById('infoLine').textContent = `Line: ${element.line}`;
+                
+                // Count dependencies and dependents
+                const dependencies = this.links.filter(l => l.source.id === element.id).length;
+                const dependents = this.links.filter(l => l.target.id === element.id).length;
+                
+                document.getElementById('infoDependencies').textContent = `Dependencies: ${dependencies}`;
+                document.getElementById('infoDependents').textContent = `Dependents: ${dependents}`;
+                
+                panel.style.display = 'block';
+            }
+            
+            showTooltip(event, d) {
+                const tooltip = document.getElementById('tooltip');
+                tooltip.innerHTML = `
+                    <strong>${d.name}</strong><br>
+                    Type: ${d.type}<br>
+                    File: ${d.file}<br>
+                    Line: ${d.line}
+                `;
+                tooltip.style.left = (event.pageX + 10) + 'px';
+                tooltip.style.top = (event.pageY - 10) + 'px';
+                tooltip.style.display = 'block';
+            }
+            
+            hideTooltip() {
+                document.getElementById('tooltip').style.display = 'none';
+            }
+            
+            resetZoom() {
+                this.svg.transition().duration(750).call(
+                    this.zoom.transform,
+                    d3.zoomIdentity
+                );
+            }
+            
+            filterGraph(filterType) {
+                if (!this.nodeElements) return;
+                
+                this.nodeElements.style("opacity", d => {
+                    if (filterType === 'all') return 1;
+                    if (filterType === 'dead-code') {
+                        // Simple dead code detection: no incoming links and not a main function
+                        const hasIncoming = this.links.some(l => l.target.id === d.id);
+                        return (!hasIncoming && d.name !== 'main') ? 1 : 0.1;
+                    }
+                    return d.type === filterType ? 1 : 0.1;
+                });
+                
+                this.labelElements.style("opacity", d => {
+                    if (filterType === 'all') return 1;
+                    if (filterType === 'dead-code') {
+                        const hasIncoming = this.links.some(l => l.target.id === d.id);
+                        return (!hasIncoming && d.name !== 'main') ? 1 : 0.1;
+                    }
+                    return d.type === filterType ? 1 : 0.1;
+                });
+            }
+            
+            searchElements(searchTerm) {
+                if (!this.nodeElements) return;
+                
+                if (!searchTerm) {
+                    this.nodeElements.style("opacity", 1);
+                    this.labelElements.style("opacity", 1);
+                    return;
+                }
+                
+                const term = searchTerm.toLowerCase();
+                this.nodeElements.style("opacity", d => 
+                    d.name.toLowerCase().includes(term) || 
+                    d.file.toLowerCase().includes(term) ? 1 : 0.1
+                );
+                
+                this.labelElements.style("opacity", d => 
+                    d.name.toLowerCase().includes(term) || 
+                    d.file.toLowerCase().includes(term) ? 1 : 0.1
+                );
+            }
+            
+            exportGraph() {
+                // Simple PNG export (would need additional libraries for full implementation)
+                alert('PNG export would be implemented with additional libraries like html2canvas');
+            }
+        }
+        
+        // Initialize the visualizer
+        const visualizer = new DependencyGraphVisualizer();
+        
+        // Load sample data if available
+        fetch('dependency_graph.json')
+            .then(response => response.json())
+            .then(data => {
+                visualizer.data = data;
+                visualizer.renderGraph();
+            })
+            .catch(() => {
+                console.log('No dependency_graph.json found. Please load a graph file.');
+            });
+    </script>
+</body>
+</html>
