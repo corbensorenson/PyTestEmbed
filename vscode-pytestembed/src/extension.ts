@@ -8,6 +8,7 @@ import { stopMcpServer } from './mcpServer';
 import { registerHoverProvider } from './hoverProvider';
 import { createServerStatusIndicators } from './statusBar';
 import { registerProviders } from './providers';
+import { registerFoldingProvider } from './folding';
 
 /**
  * PyTestEmbed VSCode Extension
@@ -28,11 +29,14 @@ export function activate(context: vscode.ExtensionContext) {
     // Create server status indicators
     createServerStatusIndicators(context);
 
-    // Register providers
-    registerProviders(context);
+    // Register providers (disabled - using new hover provider instead)
+    // registerProviders(context);
 
     // Register hover provider for dependency tooltips
     registerHoverProvider(context);
+
+    // Register folding provider for test: and doc: blocks
+    registerFoldingProvider(context);
 
     // Register all commands
     registerCommands(context);

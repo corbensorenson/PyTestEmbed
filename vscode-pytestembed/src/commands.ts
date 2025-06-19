@@ -8,6 +8,7 @@ import { state } from './state';
 import { startLiveTesting, stopLiveTesting, runIndividualTest } from './liveTesting';
 import { runTestAtCursor, showTestResultsPanel } from './testResults';
 import { startMcpServer, stopMcpServer } from './mcpServer';
+import { toggleBlockFolding } from './folding';
 import { openPyTestEmbedPanel } from './panel';
 import { BlockType } from './types';
 
@@ -221,22 +222,65 @@ export function registerCommands(context: vscode.ExtensionContext) {
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('pytestembed.navigateToElement', (...args: any[]) => {
-            console.log('🔗 Command called with args:', args);
-            // Handle both direct calls and URI-based calls
-            if (args.length === 1 && typeof args[0] === 'string') {
-                // URI-based call - parse the JSON string
-                try {
-                    const parsed = JSON.parse(decodeURIComponent(args[0]));
-                    navigateToElement(parsed);
-                } catch (error) {
-                    console.log('❌ Failed to parse URI args:', error);
-                    navigateToElement(args[0]);
+        vscode.commands.registerCommand('pytestembed.navigateToElement', (...allArgs: any[]) => {
+            console.log('🔗🔗🔗 NAVIGATION COMMAND CALLED! 🔗🔗🔗');
+            console.log('🔗 RAW COMMAND ARGS - Length:', allArgs.length);
+            console.log('🔗 RAW COMMAND ARGS - Full array:', allArgs);
+
+            for (let i = 0; i < allArgs.length; i++) {
+                console.log(`🔗 Arg[${i}]:`, allArgs[i], 'type:', typeof allArgs[i]);
+                if (typeof allArgs[i] === 'string') {
+                    console.log(`🔗 Arg[${i}] as string:`, JSON.stringify(allArgs[i]));
                 }
-            } else {
-                // Direct call
-                navigateToElement(args[0]);
             }
+
+            // Try different approaches to extract the arguments
+            let navigationArgs: any = null;
+
+            if (allArgs.length === 0) {
+                console.log('❌ No arguments passed');
+                vscode.window.showErrorMessage('No navigation arguments provided');
+                return;
+            }
+
+            const firstArg = allArgs[0];
+            console.log('🔗 Processing first arg:', firstArg, 'type:', typeof firstArg);
+
+            if (typeof firstArg === 'string') {
+                console.log('🔗 Attempting to parse string argument...');
+                try {
+                    navigationArgs = JSON.parse(firstArg);
+                    console.log('🔗 Successfully parsed string to object:', navigationArgs);
+                } catch (error) {
+                    console.log('❌ Failed to parse string as JSON:', error);
+                    console.log('❌ Raw string was:', JSON.stringify(firstArg));
+                    vscode.window.showErrorMessage(`Failed to parse navigation arguments: ${error}`);
+                    return;
+                }
+            } else if (Array.isArray(firstArg)) {
+                console.log('🔗 First arg is array, using first element...');
+                navigationArgs = firstArg[0];
+                console.log('🔗 Extracted from array:', navigationArgs);
+            } else if (firstArg && typeof firstArg === 'object') {
+                console.log('🔗 First arg is object, using directly...');
+                navigationArgs = firstArg;
+            } else {
+                console.log('❌ Unrecognized argument format');
+                vscode.window.showErrorMessage(`Unrecognized navigation argument format: ${typeof firstArg}`);
+                return;
+            }
+
+            console.log('🔗 Final navigation args:', navigationArgs);
+            console.log('🔗 file_path:', navigationArgs?.file_path);
+            console.log('🔗 line_number:', navigationArgs?.line_number);
+
+            if (!navigationArgs || !navigationArgs.file_path || !navigationArgs.line_number) {
+                console.log('❌ Missing required properties in navigation args');
+                vscode.window.showErrorMessage('Navigation arguments missing file_path or line_number');
+                return;
+            }
+
+            navigateToElement(navigationArgs);
         })
     );
 
@@ -351,132 +395,43 @@ function quickFixFunction(uri: vscode.Uri, lineNumber: number) {
 /**
  * Toggle blocks of a specific type
  */
-function toggleBlocksOfType(blockType: 'test' | 'doc', visible: boolean) {
-    const editor = vscode.window.activeTextEditor;
-    if (!editor || !editor.document.fileName.endsWith('.py')) {
-        return;
-    }
-
-    if (visible) {
-        showBlocksOfType(editor, blockType);
-    } else {
-        hideBlocksOfType(editor, blockType);
-    }
-
+async function toggleBlocksOfType(blockType: 'test' | 'doc', visible: boolean) {
+    await toggleBlockFolding(blockType, !visible); // visible=true means unfold, visible=false means fold
     vscode.window.showInformationMessage(`${visible ? 'Showing' : 'Hiding'} ${blockType} blocks`);
 }
 
 /**
  * Show all blocks
  */
-function showAllBlocks() {
-    const editor = vscode.window.activeTextEditor;
-    if (!editor || !editor.document.fileName.endsWith('.py')) {
-        return;
-    }
-
-    showBlocksOfType(editor, 'test');
-    showBlocksOfType(editor, 'doc');
-    vscode.window.showInformationMessage('Showing all blocks');
+async function showAllBlocks() {
+    // REMOVED - Will be implemented in separate folding.ts file
+    vscode.window.showInformationMessage(`Folding logic temporarily disabled - being reimplemented`);
 }
 
 /**
  * Hide all blocks
  */
-function hideAllBlocks() {
-    const editor = vscode.window.activeTextEditor;
-    if (!editor || !editor.document.fileName.endsWith('.py')) {
-        return;
-    }
-
-    hideBlocksOfType(editor, 'test');
-    hideBlocksOfType(editor, 'doc');
-    vscode.window.showInformationMessage('Hiding all blocks');
+async function hideAllBlocks() {
+    // REMOVED - Will be implemented in separate folding.ts file
+    vscode.window.showInformationMessage(`Folding logic temporarily disabled - being reimplemented`);
 }
 
 /**
  * Collapse blocks of a specific type using VSCode's folding
  */
-function hideBlocksOfType(editor: vscode.TextEditor, blockType: 'test' | 'doc') {
-    const document = editor.document;
-    const foldingRanges: vscode.FoldingRange[] = [];
-
-    for (let i = 0; i < document.lineCount; i++) {
-        const line = document.lineAt(i);
-        if (line.text.trim() === `${blockType}:`) {
-            // Find the end of this block
-            const baseIndent = line.firstNonWhitespaceCharacterIndex;
-            let endLine = i;
-
-            for (let j = i + 1; j < document.lineCount; j++) {
-                const nextLine = document.lineAt(j);
-                const trimmedText = nextLine.text.trim();
-
-                if (trimmedText === '') {
-                    continue; // Skip empty lines
-                }
-
-                const currentIndent = nextLine.firstNonWhitespaceCharacterIndex;
-                if (currentIndent <= baseIndent) {
-                    break; // End of block
-                }
-
-                endLine = j;
-            }
-
-            // Create folding range for this block
-            if (endLine > i) {
-                foldingRanges.push(new vscode.FoldingRange(i, endLine));
-            }
-        }
-    }
-
-    // Apply folding to these ranges
-    if (foldingRanges.length > 0) {
-        vscode.commands.executeCommand('editor.fold', {
-            levels: 1,
-            direction: 'down',
-            selectionLines: foldingRanges.map(range => range.start)
-        });
-    }
-}
+// REMOVED - All folding logic moved to folding.ts
 
 /**
  * Expand blocks of a specific type using VSCode's folding
  */
-function showBlocksOfType(editor: vscode.TextEditor, blockType: 'test' | 'doc') {
-    const document = editor.document;
-    const unfoldingRanges: number[] = [];
-
-    for (let i = 0; i < document.lineCount; i++) {
-        const line = document.lineAt(i);
-        if (line.text.trim() === `${blockType}:`) {
-            unfoldingRanges.push(i);
-        }
-    }
-
-    // Apply unfolding to these ranges
-    if (unfoldingRanges.length > 0) {
-        vscode.commands.executeCommand('editor.unfold', {
-            levels: 1,
-            direction: 'down',
-            selectionLines: unfoldingRanges
-        });
-    }
-}
+// REMOVED - All folding logic moved to folding.ts
 
 /**
  * Fold blocks of a specific type
  */
 function foldBlocksOfType(blockType: 'test' | 'doc') {
-    const editor = vscode.window.activeTextEditor;
-    if (!editor || !editor.document.fileName.endsWith('.py')) {
-        return;
-    }
-
-    // Use VSCode's built-in folding for this
-    vscode.commands.executeCommand('editor.foldAll');
-    vscode.window.showInformationMessage(`Folding ${blockType} blocks`);
+    // REMOVED - Will be implemented in separate folding.ts file
+    vscode.window.showInformationMessage(`Folding logic temporarily disabled - being reimplemented`);
 }
 
 /**

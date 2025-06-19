@@ -19,6 +19,7 @@ class Derp:
         return self.bar(x) + self.foo(x)
     doc:
         combines bar and foo operations - returns x*2 + x/2
+        derp
 
 test:
     foo(2)*bar(2) == 4: "foo bar test failed",

@@ -87,7 +87,7 @@ export class PyTestEmbedHoverProvider implements vscode.HoverProvider {
                 // For function/class definitions, show dependencies
                 const dependencyInfo = await this.getDependencyInfo(relativePath, word, lineNumber);
                 if (dependencyInfo) {
-                    return this.createDependencyHover(dependencyInfo);
+                    return await this.createDependencyHover(dependencyInfo);
                 }
             } else {
                 // For function calls, show documentation only
@@ -212,52 +212,93 @@ export class PyTestEmbedHoverProvider implements vscode.HoverProvider {
         });
     }
 
-    private async getElementLocation(filePath: string, elementName: string): Promise<{file_path: string, line_number: number} | null> {
-        return new Promise((resolve, reject) => {
-            const ws = new WebSocket('ws://localhost:8770');
+    private async getElementLocation(filePath: string, elementName: string, lineNumber?: number): Promise<{file_path: string, line_number: number} | null> {
+        // First try to find the definition by searching the file directly
+        try {
+            const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+            if (!workspaceFolder) {
+                return null;
+            }
 
-            const timeout = setTimeout(() => {
-                ws.close();
-                resolve(null);
-            }, 3000);
+            const fullPath = require('path').join(workspaceFolder.uri.fsPath, filePath);
+            const document = await vscode.workspace.openTextDocument(vscode.Uri.file(fullPath));
+            const text = document.getText();
+            const lines = text.split('\n');
 
-            ws.on('open', () => {
-                const request = {
-                    command: 'get_dependencies',
-                    file_path: filePath,
-                    element_name: elementName,
-                    line_number: 1
-                };
-                ws.send(JSON.stringify(request));
-            });
+            console.log(`🔍 Searching for definition of ${elementName} in ${filePath}`);
 
-            ws.on('message', (data: WebSocket.Data) => {
-                clearTimeout(timeout);
-                try {
-                    const response = JSON.parse(data.toString());
+            // Search for function or class definition
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
 
-                    if (response.type === 'dependency_info') {
-                        ws.close();
-                        // Return the element's own location
-                        resolve({
-                            file_path: response.file_path || filePath,
-                            line_number: response.line_number || 1
-                        });
-                    } else {
+                // Look for exact matches for function/class definitions
+                if (line.startsWith(`def ${elementName}(`) ||
+                    line.startsWith(`class ${elementName}(`) ||
+                    line.startsWith(`class ${elementName}:`)) {
+                    const location = {
+                        file_path: filePath,
+                        line_number: i + 1  // Convert to 1-based
+                    };
+                    console.log(`✅ Found ${elementName} definition at line ${i + 1}`);
+                    return location;
+                }
+            }
+
+            console.log(`❌ Could not find definition of ${elementName} in file`);
+            return null;
+
+        } catch (error) {
+            console.log(`❌ Error searching for ${elementName} definition:`, error);
+
+            // Fallback to dependency service
+            return new Promise((resolve, reject) => {
+                const ws = new WebSocket('ws://localhost:8770');
+
+                const timeout = setTimeout(() => {
+                    ws.close();
+                    resolve(null);
+                }, 3000);
+
+                ws.on('open', () => {
+                    const request = {
+                        command: 'get_dependencies',
+                        file_path: filePath,
+                        element_name: elementName,
+                        line_number: lineNumber || 1
+                    };
+                    console.log(`🔍 Fallback: Getting element location for ${elementName} via dependency service`);
+                    ws.send(JSON.stringify(request));
+                });
+
+                ws.on('message', (data: WebSocket.Data) => {
+                    clearTimeout(timeout);
+                    try {
+                        const response = JSON.parse(data.toString());
+
+                        if (response.type === 'dependency_info') {
+                            ws.close();
+                            const location = {
+                                file_path: response.file_path || filePath,
+                                line_number: response.line_number || lineNumber || 1
+                            };
+                            console.log(`✅ Fallback found location for ${elementName}:`, location);
+                            resolve(location);
+                        } else {
+                            ws.close();
+                            resolve(null);
+                        }
+                    } catch (error) {
                         ws.close();
                         resolve(null);
                     }
-                } catch (error) {
-                    ws.close();
-                    resolve(null);
-                }
-            });
+                });
 
-            ws.on('error', (error) => {
-                clearTimeout(timeout);
-                resolve(null);
+                ws.on('error', (error) => {
+                    clearTimeout(timeout);
+                    resolve(null);
+                });
             });
-        });
+        }
     }
 
     private async createDocumentationHover(elementName: string, documentation: string, filePath: string): Promise<vscode.Hover> {
@@ -279,7 +320,7 @@ export class PyTestEmbedHoverProvider implements vscode.HoverProvider {
         return new vscode.Hover(markdown);
     }
 
-    private createDependencyHover(info: DependencyInfo): vscode.Hover {
+    private async createDependencyHover(info: DependencyInfo): Promise<vscode.Hover> {
         const markdown = new vscode.MarkdownString();
         markdown.isTrusted = true;
 
@@ -291,8 +332,11 @@ export class PyTestEmbedHoverProvider implements vscode.HoverProvider {
             markdown.appendMarkdown(`**📥 Dependencies (${info.dependency_count}):**\n\n`);
 
             for (const dep of info.enhanced_dependencies) {
-                // Use simpler command URI format
-                const navigateUri = vscode.Uri.parse(`command:pytestembed.navigateToElement?${encodeURIComponent(JSON.stringify({file_path: dep.file_path, line_number: dep.line_number}))}`);
+                // Find the correct location using our file search method
+                const correctLocation = await this.getElementLocation(dep.file_path, dep.name);
+                const depLocation = correctLocation || {file_path: dep.file_path, line_number: dep.line_number};
+                const navigateUri = vscode.Uri.parse(`command:pytestembed.navigateToElement?${encodeURIComponent(JSON.stringify(depLocation))}`);
+                console.log(`🔗 Creating dependency link for ${dep.name}:`, depLocation);
                 markdown.appendMarkdown(`• [**${dep.name}**](${navigateUri}) (${dep.element_type}) 🔗`);
 
                 if (dep.documentation) {
@@ -308,8 +352,11 @@ export class PyTestEmbedHoverProvider implements vscode.HoverProvider {
             markdown.appendMarkdown(`**📤 Used by (${info.dependent_count}):**\n\n`);
 
             for (const dep of info.enhanced_dependents) {
-                // Use simpler command URI format
-                const navigateUri = vscode.Uri.parse(`command:pytestembed.navigateToElement?${encodeURIComponent(JSON.stringify({file_path: dep.file_path, line_number: dep.line_number}))}`);
+                // Find the correct location using our file search method
+                const correctLocation = await this.getElementLocation(dep.file_path, dep.name);
+                const depLocation = correctLocation || {file_path: dep.file_path, line_number: dep.line_number};
+                const navigateUri = vscode.Uri.parse(`command:pytestembed.navigateToElement?${encodeURIComponent(JSON.stringify(depLocation))}`);
+                console.log(`🔗 Creating dependent link for ${dep.name}:`, depLocation);
                 markdown.appendMarkdown(`• [**${dep.name}**](${navigateUri}) (${dep.element_type}) 🔗`);
 
                 if (dep.documentation) {
@@ -319,12 +366,12 @@ export class PyTestEmbedHoverProvider implements vscode.HoverProvider {
                 markdown.appendMarkdown(`\n\n`);
             }
         }
-        
+
         // If no dependencies or dependents
         if (info.enhanced_dependencies.length === 0 && info.enhanced_dependents.length === 0) {
             markdown.appendMarkdown(`*No dependencies or dependents found.*`);
         }
-        
+
         return new vscode.Hover(markdown);
     }
 }
