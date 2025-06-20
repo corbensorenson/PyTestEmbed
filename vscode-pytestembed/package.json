@@ -75,6 +75,12 @@
     ],
     "commands": [
       {
+        "command": "pytestembed.toggleDoubleClickNavigation",
+        "title": "Toggle Double-Click Navigation",
+        "category": "PyTestEmbed",
+        "icon": "$(link)"
+      },
+      {
         "command": "pytestembed.toggleTestBlocks",
         "title": "Toggle Test Blocks",
         "category": "PyTestEmbed",
@@ -203,6 +209,12 @@
         "title": "Run Python File (Ignore Tests/Docs)",
         "category": "PyTestEmbed",
         "icon": "$(play)"
+      },
+      {
+        "command": "pytestembed.toggleDoubleClickNavigation",
+        "title": "Toggle Double-Click Navigation",
+        "category": "PyTestEmbed",
+        "icon": "$(link)"
       }
     ],
     "keybindings": [
@@ -258,6 +270,10 @@
         }
       ],
       "pytestembed.context": [
+        {
+          "command": "pytestembed.toggleDoubleClickNavigation",
+          "group": "navigation@1"
+        },
         {
           "command": "pytestembed.toggleTestBlocks",
           "group": "visibility@1"

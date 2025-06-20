@@ -344,6 +344,18 @@ export function registerCommands(context: vscode.ExtensionContext) {
             }
         })
     );
+
+    // Toggle double-click navigation command
+    context.subscriptions.push(
+        vscode.commands.registerCommand('pytestembed.toggleDoubleClickNavigation', () => {
+            const config = vscode.workspace.getConfiguration('pytestembed');
+            const currentValue = config.get<boolean>('doubleClickNavigation', true);
+            config.update('doubleClickNavigation', !currentValue, vscode.ConfigurationTarget.Global);
+
+            const status = !currentValue ? 'enabled' : 'disabled';
+            vscode.window.showInformationMessage(`Double-click navigation ${status}`);
+        })
+    );
 }
 
 /**

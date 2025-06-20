@@ -340,7 +340,7 @@ export class PyTestEmbedHoverProvider implements vscode.HoverProvider {
         return false;
     }
 
-    private async findElementAcrossFiles(elementName: string): Promise<{file_path: string, line_number: number} | null> {
+    public async findElementAcrossFiles(elementName: string): Promise<{file_path: string, line_number: number} | null> {
         try {
             const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
             if (!workspaceFolder) {
@@ -387,7 +387,7 @@ export class PyTestEmbedHoverProvider implements vscode.HoverProvider {
         }
     }
 
-    private async getElementLocation(filePath: string, elementName: string, lineNumber?: number): Promise<{file_path: string, line_number: number} | null> {
+    public async getElementLocation(filePath: string, elementName: string, lineNumber?: number): Promise<{file_path: string, line_number: number} | null> {
         // First try to find the definition by searching the file directly
         try {
             const workspaceFolder = vscode.workspace.workspaceFolders?.[0];

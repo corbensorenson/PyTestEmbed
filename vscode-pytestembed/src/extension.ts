@@ -33,11 +33,15 @@ function registerDoubleClickHandler(context: vscode.ExtensionContext) {
         const currentTime = Date.now();
         const selection = event.selections[0];
 
-        // Check if this is a potential double-click (same position, within time threshold)
+        console.log(`🖱️ Click detected at ${selection.start.line}:${selection.start.character}, time: ${currentTime}`);
+
+        // Check if this is a potential double-click (same line, close position, within time threshold)
         if (lastClickPosition &&
-            selection.start.isEqual(lastClickPosition) &&
+            selection.start.line === lastClickPosition.line &&
+            Math.abs(selection.start.character - lastClickPosition.character) <= 2 &&
             currentTime - lastClickTime < doubleClickThreshold) {
 
+            console.log(`🖱️🖱️ Double-click detected! Opening definition in split editor...`);
             // This is a double-click, try to open definition in split editor
             await openDefinitionInSplitEditor(event.textEditor, selection.start);
         }
@@ -54,6 +58,14 @@ function registerDoubleClickHandler(context: vscode.ExtensionContext) {
  */
 async function openDefinitionInSplitEditor(editor: vscode.TextEditor, position: vscode.Position) {
     try {
+        // Check if double-click navigation is enabled
+        const config = vscode.workspace.getConfiguration('pytestembed');
+        const doubleClickEnabled = config.get<boolean>('doubleClickNavigation', true);
+
+        if (!doubleClickEnabled) {
+            return;
+        }
+
         // Get the word at the cursor position
         const wordRange = editor.document.getWordRangeAtPosition(position);
         if (!wordRange) {
@@ -63,27 +75,32 @@ async function openDefinitionInSplitEditor(editor: vscode.TextEditor, position: 
         const word = editor.document.getText(wordRange);
         console.log(`🔍 Double-clicked on: ${word}`);
 
-        // Use VSCode's built-in "Go to Definition" command to find the definition
-        const definitions = await vscode.commands.executeCommand<vscode.Location[]>(
-            'vscode.executeDefinitionProvider',
-            editor.document.uri,
-            position
-        );
+        // Use our PyTestEmbed hover provider logic to find the element
+        const { PyTestEmbedHoverProvider } = await import('./hoverProvider');
+        const hoverProvider = new PyTestEmbedHoverProvider();
 
-        if (definitions && definitions.length > 0) {
-            const definition = definitions[0];
-            console.log(`📍 Found definition at: ${definition.uri.fsPath}:${definition.range.start.line + 1}`);
+        // Get the relative path for the current file
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+        if (!workspaceFolder) {
+            return;
+        }
 
-            // Open the definition file in a split editor to the right
-            const document = await vscode.workspace.openTextDocument(definition.uri);
-            const splitEditor = await vscode.window.showTextDocument(document, {
-                viewColumn: vscode.ViewColumn.Beside, // Open in split editor to the right
-                selection: definition.range,
-                preserveFocus: false
-            });
+        const relativePath = vscode.workspace.asRelativePath(editor.document.uri);
+        const lineNumber = position.line + 1; // Convert to 1-based
 
-            // Reveal the definition line
-            splitEditor.revealRange(definition.range, vscode.TextEditorRevealType.InCenter);
+        // Try to find element location using our hover provider methods
+        let elementInfo = await hoverProvider.getElementLocation(relativePath, word);
+
+        // If not found in current file, search across workspace
+        if (!elementInfo) {
+            elementInfo = await hoverProvider.findElementAcrossFiles(word);
+        }
+
+        if (elementInfo) {
+            console.log(`📍 Found definition at: ${elementInfo.file_path}:${elementInfo.line_number}`);
+
+            // Use our existing split navigation command
+            await vscode.commands.executeCommand('pytestembed.navigateToElementSplit', elementInfo);
 
             console.log(`✅ Opened ${word} definition in split editor`);
         } else {
