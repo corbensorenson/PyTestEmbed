@@ -489,10 +489,11 @@ export class PyTestEmbedHoverProvider implements vscode.HoverProvider {
         }
 
         if (elementInfo) {
-            // Use a simpler command URI format
+            // Create both navigation links
             const navigateUri = vscode.Uri.parse(`command:pytestembed.navigateToElement?${encodeURIComponent(JSON.stringify(elementInfo))}`);
-            markdown.appendMarkdown(`**📖 [${elementName}](${navigateUri}) 🔗**\n\n`);
-            console.log(`🔗 Created navigation link for ${elementName}:`, elementInfo);
+            const navigateSplitUri = vscode.Uri.parse(`command:pytestembed.navigateToElementSplit?${encodeURIComponent(JSON.stringify(elementInfo))}`);
+            markdown.appendMarkdown(`**📖 [${elementName}](${navigateUri}) 🔗 | [📱 Split](${navigateSplitUri})**\n\n`);
+            console.log(`🔗 Created navigation links for ${elementName}:`, elementInfo);
         } else {
             markdown.appendMarkdown(`**📖 ${elementName}**\n\n`);
             console.log(`❌ No navigation link for ${elementName} - element not found`);
@@ -526,6 +527,7 @@ export class PyTestEmbedHoverProvider implements vscode.HoverProvider {
                 depLocation = depLocation || {file_path: dep.file_path, line_number: dep.line_number};
 
                 const navigateUri = vscode.Uri.parse(`command:pytestembed.navigateToElement?${encodeURIComponent(JSON.stringify(depLocation))}`);
+                const navigateSplitUri = vscode.Uri.parse(`command:pytestembed.navigateToElementSplit?${encodeURIComponent(JSON.stringify(depLocation))}`);
                 console.log(`🔗 Creating dependency link for ${dep.name}:`, depLocation);
 
                 // Get documentation for cross-file elements
@@ -535,7 +537,7 @@ export class PyTestEmbedHoverProvider implements vscode.HoverProvider {
                     documentation = crossFileDoc?.documentation || '';
                 }
 
-                markdown.appendMarkdown(`• [**${dep.name}**](${navigateUri}) (${dep.element_type}) 🔗`);
+                markdown.appendMarkdown(`• [**${dep.name}**](${navigateUri}) (${dep.element_type}) 🔗 | [📱 Split](${navigateSplitUri})`);
 
                 if (documentation) {
                     markdown.appendMarkdown(`  \n  📝 ${documentation}`);
@@ -562,6 +564,7 @@ export class PyTestEmbedHoverProvider implements vscode.HoverProvider {
                 depLocation = depLocation || {file_path: dep.file_path, line_number: dep.line_number};
 
                 const navigateUri = vscode.Uri.parse(`command:pytestembed.navigateToElement?${encodeURIComponent(JSON.stringify(depLocation))}`);
+                const navigateSplitUri = vscode.Uri.parse(`command:pytestembed.navigateToElementSplit?${encodeURIComponent(JSON.stringify(depLocation))}`);
                 console.log(`🔗 Creating dependent link for ${dep.name}:`, depLocation);
 
                 // Get documentation for cross-file elements
@@ -571,7 +574,7 @@ export class PyTestEmbedHoverProvider implements vscode.HoverProvider {
                     documentation = crossFileDoc?.documentation || '';
                 }
 
-                markdown.appendMarkdown(`• [**${dep.name}**](${navigateUri}) (${dep.element_type}) 🔗`);
+                markdown.appendMarkdown(`• [**${dep.name}**](${navigateUri}) (${dep.element_type}) 🔗 | [📱 Split](${navigateSplitUri})`);
 
                 if (documentation) {
                     markdown.appendMarkdown(`  \n  📝 ${documentation}`);

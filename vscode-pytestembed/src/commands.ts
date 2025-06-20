@@ -292,6 +292,48 @@ export function registerCommands(context: vscode.ExtensionContext) {
         })
     );
 
+    // Navigate to element in split view
+    context.subscriptions.push(
+        vscode.commands.registerCommand('pytestembed.navigateToElementSplit', (...allArgs: any[]) => {
+            console.log('🔗📱 SPLIT NAVIGATION COMMAND CALLED! 🔗📱');
+            console.log('🔗 RAW COMMAND ARGS - Length:', allArgs.length);
+            console.log('🔗 RAW COMMAND ARGS - Full array:', allArgs);
+
+            // Use the same argument parsing logic as the regular navigation
+            let navigationArgs: any = null;
+
+            if (allArgs.length === 0) {
+                console.log('❌ No arguments passed');
+                vscode.window.showErrorMessage('No navigation arguments provided');
+                return;
+            }
+
+            // Try different approaches to extract the arguments
+            if (allArgs.length === 1) {
+                const firstArg = allArgs[0];
+                if (typeof firstArg === 'string') {
+                    try {
+                        navigationArgs = JSON.parse(firstArg);
+                    } catch (e) {
+                        console.log('❌ Failed to parse string argument as JSON');
+                    }
+                } else if (typeof firstArg === 'object') {
+                    navigationArgs = firstArg;
+                }
+            }
+
+            console.log('🔗 Final navigation args:', navigationArgs);
+
+            if (!navigationArgs || !navigationArgs.file_path || !navigationArgs.line_number) {
+                console.log('❌ Missing required properties in navigation args');
+                vscode.window.showErrorMessage('Navigation arguments missing file_path or line_number');
+                return;
+            }
+
+            navigateToElementSplit(navigationArgs);
+        })
+    );
+
     // Smart folding command
     context.subscriptions.push(
         vscode.commands.registerCommand('pytestembed.foldFunctionWithBlocks', () => {
@@ -558,6 +600,60 @@ async function navigateToElement(args: any) {
 
     } catch (error) {
         vscode.window.showErrorMessage('Invalid navigation arguments');
+    }
+}
+
+/**
+ * Navigate to a specific element in split view (for hover provider)
+ */
+async function navigateToElementSplit(args: any) {
+    try {
+        console.log('🔗📱 navigateToElementSplit called with args:', args, 'type:', typeof args);
+
+        // Handle different argument formats
+        let file_path: string, line_number: number;
+
+        if (Array.isArray(args) && args.length > 0) {
+            // Array format: [{file_path: "...", line_number: 123}]
+            ({ file_path, line_number } = args[0]);
+        } else if (args && typeof args === 'object' && args.file_path) {
+            // Object format: {file_path: "...", line_number: 123}
+            ({ file_path, line_number } = args);
+        } else {
+            console.log('❌ Invalid arguments format');
+            vscode.window.showErrorMessage('Invalid navigation arguments format');
+            return;
+        }
+
+        console.log('🔗📱 Navigating to split view:', file_path, 'line:', line_number);
+
+        // Find the workspace folder
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+        if (!workspaceFolder) {
+            vscode.window.showErrorMessage('No workspace folder found');
+            return;
+        }
+
+        // Construct the full file path
+        const fullPath = path.join(workspaceFolder.uri.fsPath, file_path);
+        const fileUri = vscode.Uri.file(fullPath);
+
+        try {
+            // Open the file in split view and navigate to the line
+            const document = await vscode.workspace.openTextDocument(fileUri);
+            const editor = await vscode.window.showTextDocument(document, vscode.ViewColumn.Beside);
+
+            // Navigate to the specific line
+            const position = new vscode.Position(line_number - 1, 0); // Convert to 0-based
+            editor.selection = new vscode.Selection(position, position);
+            editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
+
+        } catch (error) {
+            vscode.window.showErrorMessage(`Could not open file in split view: ${file_path}`);
+        }
+
+    } catch (error) {
+        vscode.window.showErrorMessage('Invalid navigation arguments for split view');
     }
 }
 
