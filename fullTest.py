@@ -1,3 +1,13 @@
+# PyTestEmbed automatically enables import handling for files with test: and doc: blocks
+import pytestembed
+from derp import Derp
+
+import sys
+import os
+sys.path.insert(0, os.path.dirname(__file__))
+
+
+
 
 """
 PyTestEmbed Full Feature Demonstration
@@ -12,25 +22,6 @@ This file demonstrates all PyTestEmbed capabilities:
 - AI-generated content examples
 """
 
-# Import from derp.py to show cross-file dependency tracking
-import sys
-import os
-sys.path.insert(0, os.path.dirname(__file__))
-
-try:
-    from derp import Derp
-    IMPORTS_AVAILABLE = True
-except ImportError:
-    # Fallback if derp.py is not available - create mock implementations
-    IMPORTS_AVAILABLE = False
-
-    class Derp:
-        """Mock Derp class for demonstration"""
-        def foo(self, x):
-            return x / 2
-
-        def bar(self, x):
-            return x * 2
 
 
 class Calculator:

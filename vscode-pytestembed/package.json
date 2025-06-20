@@ -2,7 +2,7 @@
   "name": "pytestembed",
   "displayName": "PyTestEmbed",
   "description": "Syntax highlighting and folding for PyTestEmbed embedded test and documentation blocks",
-  "version": "0.1.5",
+  "version": "0.1.8",
   "publisher": "pytestembed",
   "engines": {
     "vscode": "^1.74.0"
@@ -64,6 +64,13 @@
         "injectTo": [
           "source.python"
         ]
+      }
+    ],
+    "themes": [
+      {
+        "label": "PyTestEmbed Theme",
+        "uiTheme": "vs-dark",
+        "path": "./themes/pytestembed-theme.json"
       }
     ],
     "commands": [

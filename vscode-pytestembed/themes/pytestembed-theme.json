@@ -1,0 +1,64 @@
+{
+  "name": "PyTestEmbed Theme",
+  "type": "dark",
+  "colors": {},
+  "tokenColors": [
+    {
+      "scope": "meta.test-block.pytestembed",
+      "settings": {
+        "background": "#4a1a4a"
+      }
+    },
+    {
+      "scope": "meta.test-content.pytestembed",
+      "settings": {
+        "foreground": "#d8a0d8"
+      }
+    },
+    {
+      "scope": "keyword.control.test.pytestembed",
+      "settings": {
+        "foreground": "#ff6b9d",
+        "fontStyle": "bold"
+      }
+    },
+    {
+      "scope": "punctuation.separator.colon.pytestembed",
+      "settings": {
+        "foreground": "#ff6b9d"
+      }
+    },
+    {
+      "scope": "string.quoted.double.test-description.pytestembed",
+      "settings": {
+        "foreground": "#a8e6cf"
+      }
+    },
+    {
+      "scope": "keyword.operator.comparison.pytestembed",
+      "settings": {
+        "foreground": "#ffd93d",
+        "fontStyle": "bold"
+      }
+    },
+    {
+      "scope": "punctuation.separator.comma.pytestembed",
+      "settings": {
+        "foreground": "#ff6b9d"
+      }
+    },
+    {
+      "scope": "keyword.control.doc.pytestembed",
+      "settings": {
+        "foreground": "#6bcf7f",
+        "fontStyle": "bold"
+      }
+    },
+    {
+      "scope": "comment.block.pytestembed.doc",
+      "settings": {
+        "foreground": "#a8e6cf"
+      }
+    }
+  ]
+}

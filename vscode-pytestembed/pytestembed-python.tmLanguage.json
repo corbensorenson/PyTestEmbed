@@ -5,17 +5,9 @@
   "injectionSelector": "L:source.python",
   "patterns": [
     {
-      "include": "#pytestembed-test-block"
-    },
-    {
-      "include": "#pytestembed-doc-block"
-    }
-  ],
-  "repository": {
-    "pytestembed-test-block": {
       "name": "meta.test-block.pytestembed",
       "begin": "^(\\s*)(test)(:)\\s*$",
-      "end": "^(?=\\s*(?:def\\s|class\\s|@|test:|doc:|$))|^(?=\\S)",
+      "end": "^(?=\\s*(?:def\\s|class\\s|@))|^(?=\\s*(?:test:|doc:))|^(?=\\S)",
       "beginCaptures": {
         "2": {
           "name": "keyword.control.test.pytestembed"
@@ -24,17 +16,16 @@
           "name": "punctuation.separator.colon.pytestembed"
         }
       },
-
       "patterns": [
         {
-          "include": "#test-content"
+          "include": "source.python"
         }
       ]
     },
-    "pytestembed-doc-block": {
+    {
       "name": "meta.doc-block.pytestembed",
       "begin": "^(\\s*)(doc)(:)\\s*$",
-      "end": "^(?=\\s*(?:def\\s|class\\s|@|test:|doc:))|^(?=\\S)(?!\\s*$)",
+      "end": "^(?=\\s*(?:def\\s|class\\s|@))|^(?=\\s*(?:test:|doc:))|^(?=\\S)",
       "beginCaptures": {
         "2": {
           "name": "keyword.control.doc.pytestembed"
@@ -49,47 +40,9 @@
           "include": "#doc-content"
         }
       ]
-    },
-    "test-content": {
-      "patterns": [
-        {
-          "name": "comment.line.number-sign.python",
-          "match": "^\\s*(#.*)$"
-        },
-        {
-          "name": "meta.test-case.pytestembed",
-          "match": "^\\s*(.+?)\\s*(==|!=|<=|>=|<|>|\\s+is\\s+|\\s+in\\s+)\\s*(.+?)\\s*:\\s*([\"'])(.*?)\\4\\s*,?\\s*$",
-          "captures": {
-            "1": {
-              "patterns": [
-                {
-                  "include": "source.python"
-                }
-              ]
-            },
-            "2": {
-              "name": "keyword.operator.comparison.python"
-            },
-            "3": {
-              "patterns": [
-                {
-                  "include": "source.python"
-                }
-              ]
-            },
-            "4": {
-              "name": "punctuation.definition.string.begin.python"
-            },
-            "5": {
-              "name": "string.quoted.double.python"
-            }
-          }
-        },
-        {
-          "include": "source.python"
-        }
-      ]
-    },
+    }
+  ],
+  "repository": {
     "doc-content": {
       "patterns": [
         {

@@ -1,4 +1,5 @@
 class Derp:
+
     def foo(self, x):
         return x/2
     test:
@@ -10,7 +11,7 @@ class Derp:
     def bar(self, x):
         return x*2
     test:
-        bar(2) == 5: "bar failed with 2", #wrote to fail...
+        bar(2) == 4: "bar failed with 2", #wrote to fail...
         bar(4) == 8: "bar failed with 4"
     doc:
         returns double the input
@@ -19,7 +20,7 @@ class Derp:
         return self.bar(x) + self.foo(x)
     doc:
         combines bar and foo operations - returns x*2 + x/2
-        derp
+        
 test:
     foo(2)*bar(2) == 4: "foo bar test failed",
     a = bar(2)
