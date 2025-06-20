@@ -25,6 +25,7 @@ class Derp:
         #for baz
         baz(2) == 5: "baz failed with 2",
         baz(4) == 10: "baz failed with 4"
+
 test:
     #for class Derp
     foo(2)*bar(2) == 4: "foo bar test failed",

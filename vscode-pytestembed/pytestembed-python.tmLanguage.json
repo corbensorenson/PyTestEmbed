@@ -5,51 +5,100 @@
   "injectionSelector": "L:source.python",
   "patterns": [
     {
-      "name": "meta.test-block.pytestembed",
-      "begin": "^(\\s*)(test)(:)\\s*",
-      "end": "^(?=\\1(?:def\\s|class\\s|@|\\S))",
-      "beginCaptures": {
-        "1": {
-          "name": "meta.indent.pytestembed"
-        },
-        "2": {
-          "name": "keyword.control.test.pytestembed"
-        },
-        "3": {
-          "name": "punctuation.separator.colon.pytestembed"
-        }
-      },
-      "contentName": "source.python.embedded.pytestembed",
-      "patterns": [
-        {
-          "include": "source.python"
-        }
-      ]
-    },
-    {
-      "name": "meta.doc-block.pytestembed",
-      "begin": "^(\\s*)(doc)(:)\\s*",
-      "end": "^(?=\\1(?:def\\s|class\\s|@|\\S))",
-      "beginCaptures": {
-        "1": {
-          "name": "meta.indent.pytestembed"
-        },
-        "2": {
-          "name": "keyword.control.doc.pytestembed"
-        },
-        "3": {
-          "name": "punctuation.separator.colon.pytestembed"
-        }
-      },
-      "contentName": "comment.block.pytestembed.doc",
-      "patterns": [
-        {
-          "include": "#doc-content"
-        }
-      ]
+      "include": "#pytestembed-blocks"
     }
   ],
   "repository": {
+    "pytestembed-blocks": {
+      "patterns": [
+        {
+          "name": "meta.pytestembed-keyword.pytestembed",
+          "match": "^(\\s*)(test|doc)(:)\\s*$",
+          "captures": {
+            "1": {
+              "name": "meta.indent.pytestembed"
+            },
+            "2": {
+              "name": "keyword.control.pytestembed"
+            },
+            "3": {
+              "name": "punctuation.separator.colon.pytestembed"
+            }
+          }
+        },
+        {
+          "name": "meta.test-block.pytestembed",
+          "begin": "^(\\s*)(test)(:)\\s*$",
+          "end": "(?=^\\1\\S|^\\S)",
+          "beginCaptures": {
+            "1": {
+              "name": "meta.indent.pytestembed"
+            },
+            "2": {
+              "name": "keyword.control.test.pytestembed"
+            },
+            "3": {
+              "name": "punctuation.separator.colon.pytestembed"
+            }
+          },
+          "patterns": [
+            {
+              "match": "^(\\s*)(test|doc)(:)\\s*$",
+              "captures": {
+                "1": {
+                  "name": "meta.indent.pytestembed"
+                },
+                "2": {
+                  "name": "keyword.control.pytestembed"
+                },
+                "3": {
+                  "name": "punctuation.separator.colon.pytestembed"
+                }
+              }
+            },
+            {
+              "include": "source.python"
+            }
+          ]
+        },
+        {
+          "name": "meta.doc-block.pytestembed",
+          "begin": "^(\\s*)(doc)(:)\\s*$",
+          "end": "(?=^\\1\\S|^\\S)",
+          "beginCaptures": {
+            "1": {
+              "name": "meta.indent.pytestembed"
+            },
+            "2": {
+              "name": "keyword.control.doc.pytestembed"
+            },
+            "3": {
+              "name": "punctuation.separator.colon.pytestembed"
+            }
+          },
+          "contentName": "comment.block.pytestembed.doc",
+          "patterns": [
+            {
+              "match": "^(\\s*)(test|doc)(:)\\s*$",
+              "captures": {
+                "1": {
+                  "name": "meta.indent.pytestembed"
+                },
+                "2": {
+                  "name": "keyword.control.pytestembed"
+                },
+                "3": {
+                  "name": "punctuation.separator.colon.pytestembed"
+                }
+              }
+            },
+            {
+              "include": "#doc-content"
+            }
+          ]
+        }
+      ]
+    },
     "doc-content": {
       "patterns": [
         {
