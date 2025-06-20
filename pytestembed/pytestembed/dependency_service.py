@@ -112,32 +112,42 @@ class DependencyService:
             dependencies = self.dependency_graph.get_dependencies(element_id)
             dependents = self.dependency_graph.get_dependents(element_id)
             
-            # Create enhanced dependency info with documentation
+            # Create enhanced dependency info with documentation and deduplication
             enhanced_dependencies = []
+            seen_deps = set()
             for dep_id in dependencies:
                 if dep_id in self.dependency_graph.elements:
                     dep_element = self.dependency_graph.elements[dep_id]
-                    enhanced_dependencies.append({
-                        'id': dep_id,
-                        'name': dep_element.name,
-                        'file_path': dep_element.file_path,
-                        'line_number': dep_element.line_number,
-                        'documentation': dep_element.documentation,
-                        'element_type': dep_element.element_type
-                    })
-            
+                    # Create a unique key for deduplication
+                    dep_key = (dep_element.name, dep_element.file_path, dep_element.element_type)
+                    if dep_key not in seen_deps:
+                        seen_deps.add(dep_key)
+                        enhanced_dependencies.append({
+                            'id': dep_id,
+                            'name': dep_element.name,
+                            'file_path': dep_element.file_path,
+                            'line_number': dep_element.line_number,
+                            'documentation': dep_element.documentation,
+                            'element_type': dep_element.element_type
+                        })
+
             enhanced_dependents = []
+            seen_dependents = set()
             for dep_id in dependents:
                 if dep_id in self.dependency_graph.elements:
                     dep_element = self.dependency_graph.elements[dep_id]
-                    enhanced_dependents.append({
-                        'id': dep_id,
-                        'name': dep_element.name,
-                        'file_path': dep_element.file_path,
-                        'line_number': dep_element.line_number,
-                        'documentation': dep_element.documentation,
-                        'element_type': dep_element.element_type
-                    })
+                    # Create a unique key for deduplication
+                    dep_key = (dep_element.name, dep_element.file_path, dep_element.element_type)
+                    if dep_key not in seen_dependents:
+                        seen_dependents.add(dep_key)
+                        enhanced_dependents.append({
+                            'id': dep_id,
+                            'name': dep_element.name,
+                            'file_path': dep_element.file_path,
+                            'line_number': dep_element.line_number,
+                            'documentation': dep_element.documentation,
+                            'element_type': dep_element.element_type
+                        })
             
             response = {
                 'type': 'dependency_info',
@@ -262,12 +272,11 @@ class DependencyService:
         candidates = [
             f"{file_path}:{element_name}",  # Global function (absolute path)
             f"{relative_path}:{element_name}",  # Global function (relative path)
-            f"{file_path}:Derp.{element_name}",  # Method in Derp class (absolute path)
-            f"{relative_path}:Derp.{element_name}",  # Method in Derp class (relative path)
         ]
 
-        # Also try other common class names
-        for class_name in ['Calculator', 'DataProcessor']:
+        # Dynamically discover all classes in the target file and try method lookups
+        discovered_classes = self._get_classes_in_file(relative_path)
+        for class_name in discovered_classes:
             candidates.extend([
                 f"{file_path}:{class_name}.{element_name}",
                 f"{relative_path}:{class_name}.{element_name}",
@@ -280,6 +289,13 @@ class DependencyService:
                 return candidate
             else:
                 print(f"❌ Candidate not found: {candidate}")
+
+        # Try cross-file search - look for this element in any file
+        print(f"🔍 Searching across all files for {element_name}")
+        for element_id, element in self.dependency_graph.elements.items():
+            if element.name == element_name:
+                print(f"🎯 Found cross-file element: {element_id}")
+                return element_id
 
         # Try fuzzy matching by name and file (check both absolute and relative paths)
         for element_id, element in self.dependency_graph.elements.items():
@@ -302,12 +318,11 @@ class DependencyService:
         candidates = [
             f"{file_path}:{element_name}",  # Global function or class (absolute path)
             f"{relative_path}:{element_name}",  # Global function or class (relative path)
-            f"{file_path}:Derp.{element_name}",  # Method in Derp class (absolute path)
-            f"{relative_path}:Derp.{element_name}",  # Method in Derp class (relative path)
         ]
 
-        # Also try other common class names
-        for class_name in ['Calculator', 'DataProcessor']:
+        # Dynamically discover all classes in the target file and try method lookups
+        discovered_classes = self._get_classes_in_file(relative_path)
+        for class_name in discovered_classes:
             candidates.extend([
                 f"{file_path}:{class_name}.{element_name}",
                 f"{relative_path}:{class_name}.{element_name}",
@@ -317,6 +332,11 @@ class DependencyService:
             if candidate in self.dependency_graph.elements:
                 return candidate
 
+        # Try cross-file search - look for this element in any file
+        for element_id, element in self.dependency_graph.elements.items():
+            if element.name == element_name:
+                return element_id
+
         # Try fuzzy matching by name and file (check both absolute and relative paths)
         for element_id, element in self.dependency_graph.elements.items():
             element_file_path = element.file_path
@@ -325,6 +345,19 @@ class DependencyService:
                 return element_id
 
         return None
+
+    def _get_classes_in_file(self, file_path: str) -> List[str]:
+        """Dynamically discover all class names in the given file."""
+        classes = []
+
+        # Look through all elements in the dependency graph for classes in this file
+        for element_id, element in self.dependency_graph.elements.items():
+            if (element.file_path == file_path and
+                element.element_type == 'class'):
+                classes.append(element.name)
+
+        print(f"🔍 Discovered classes in {file_path}: {classes}")
+        return classes
 
     def _get_relative_path(self, file_path: str) -> str:
         """Convert absolute path to relative path from workspace root."""

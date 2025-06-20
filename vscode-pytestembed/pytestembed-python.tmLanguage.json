@@ -6,9 +6,12 @@
   "patterns": [
     {
       "name": "meta.test-block.pytestembed",
-      "begin": "^(\\s*)(test)(:)\\s*$",
-      "end": "^(?=\\s*(?:def\\s|class\\s|@))|^(?=\\s*(?:test:|doc:))|^(?=\\S)",
+      "begin": "^(\\s*)(test)(:)\\s*",
+      "end": "^(?=\\1(?:def\\s|class\\s|@|\\S))",
       "beginCaptures": {
+        "1": {
+          "name": "meta.indent.pytestembed"
+        },
         "2": {
           "name": "keyword.control.test.pytestembed"
         },
@@ -16,6 +19,7 @@
           "name": "punctuation.separator.colon.pytestembed"
         }
       },
+      "contentName": "source.python.embedded.pytestembed",
       "patterns": [
         {
           "include": "source.python"
@@ -24,9 +28,12 @@
     },
     {
       "name": "meta.doc-block.pytestembed",
-      "begin": "^(\\s*)(doc)(:)\\s*$",
-      "end": "^(?=\\s*(?:def\\s|class\\s|@))|^(?=\\s*(?:test:|doc:))|^(?=\\S)",
+      "begin": "^(\\s*)(doc)(:)\\s*",
+      "end": "^(?=\\1(?:def\\s|class\\s|@|\\S))",
       "beginCaptures": {
+        "1": {
+          "name": "meta.indent.pytestembed"
+        },
         "2": {
           "name": "keyword.control.doc.pytestembed"
         },

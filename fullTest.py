@@ -36,12 +36,16 @@ class Calculator:
         result = round(a + b, self.precision)
         self.history.append(f"{a} + {b} = {result}")
         return result
+    doc:
+        adds two numbers
     
     def multiply(self, a, b):
         """Multiply two numbers"""
         result = round(a * b, self.precision)
         self.history.append(f"{a} * {b} = {result}")
         return result
+    doc:
+        multiplies two numbers
     
     def divide(self, a, b):
         """Divide with zero protection"""
@@ -50,6 +54,8 @@ class Calculator:
         result = round(a / b, self.precision)
         self.history.append(f"{a} / {b} = {result}")
         return result
+    doc:
+        divides shit
     
     def get_history(self):
         """Get calculation history"""

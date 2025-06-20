@@ -60,15 +60,45 @@ export class PyTestEmbedHoverProvider implements vscode.HoverProvider {
         // Check if we're hovering over a function/class definition
         const isDefinition = lineText.trim().startsWith('def ') || lineText.trim().startsWith('class ');
 
+        // Check if we're hovering over a method call (e.g., obj.method())
+        const beforeWord = lineText.substring(0, wordRange.start.character);
+        const afterWord = lineText.substring(wordRange.end.character);
+        const isMethodCall = beforeWord.includes('.') || afterWord.startsWith('(');
+
+        // Check if this is a method being called on an object (e.g., "add" in "calc.add()")
+        const isMethodInCall = /\w+\s*\.\s*$/.test(beforeWord) && afterWord.startsWith('(');
+
+        // Check if we're hovering over a variable that might be an instance
+        const isVariableInstance = /^\s*\w+\s*=.*\w+\(\)/.test(lineText) && lineText.includes(word);
+
+        // Check if we're hovering over an object in a method call (e.g., "obj" in "obj.method()")
+        const isObjectInMethodCall = afterWord.startsWith('.') || /\.\w+\(/.test(lineText.substring(wordRange.end.character));
+
+        // Additional check for method calls using a broader pattern
+        const isLikelyMethodCall = /\w+\s*\.\s*\w+\s*\(/.test(lineText) && lineText.includes(word);
+
+        // Debug logging
+        console.log(`🔍 Hover debug for "${word}":`, {
+            beforeWord: `"${beforeWord}"`,
+            afterWord: `"${afterWord}"`,
+            isMethodCall,
+            isMethodInCall,
+            isVariableInstance,
+            isObjectInMethodCall,
+            isLikelyMethodCall,
+            lineText: `"${lineText}"`
+        });
+
         // Skip single-letter variables but allow class names (usually capitalized)
         if (!isDefinition && word.length === 1) {
             return undefined;
         }
 
-        // Skip common variable patterns but allow class names
-        if (!isDefinition && /^[a-z]+$/.test(word) && word.length > 1) {
-            // Allow if it looks like a class name (starts with capital) or common function names
-            if (!/^[A-Z]/.test(word) && !['foo', 'bar', 'baz', 'main'].includes(word)) {
+        // Allow any word that looks like it could be a function/method/class
+        // Only skip very short words that are likely variables
+        if (!isDefinition && !isMethodCall && !isVariableInstance && !isObjectInMethodCall && !isMethodInCall && !isLikelyMethodCall) {
+            // Skip single letters and very common short words that are unlikely to be functions
+            if (word.length === 1 || ['a', 'b', 'c', 'x', 'y', 'z', 'i', 'j', 'k', 'n', 'm'].includes(word)) {
                 return undefined;
             }
         }
@@ -90,10 +120,60 @@ export class PyTestEmbedHoverProvider implements vscode.HoverProvider {
                     return await this.createDependencyHover(dependencyInfo);
                 }
             } else {
-                // For function calls, show documentation only
-                const docInfo = await this.getDocumentationInfo(relativePath, word);
+                // For function calls, method calls, and instances, show documentation
+                let targetElement = word;
+
+                // If it's a variable instance, try to find what class it's an instance of
+                if (isVariableInstance) {
+                    const classMatch = lineText.match(/(\w+)\s*=.*?(\w+)\(\)/);
+                    if (classMatch && classMatch[1] === word) {
+                        targetElement = classMatch[2]; // Use the class name instead
+                        console.log(`🔍 Variable ${word} is instance of ${targetElement}`);
+                    }
+                }
+
+                // If it's an object in a method call, try to find the class type
+                if (isObjectInMethodCall) {
+                    // Look for variable assignment in the file to determine type
+                    const text = document.getText();
+                    const assignmentPattern = new RegExp(`${word}\\s*=.*?(\\w+)\\(\\)`, 'g');
+                    const match = assignmentPattern.exec(text);
+                    if (match) {
+                        targetElement = match[1]; // Use the class name
+                        console.log(`🔍 Object ${word} is instance of ${targetElement}`);
+                    }
+                }
+
+                // If it's a method being called on an object (e.g., "add" in "calc.add()")
+                if (isMethodInCall) {
+                    // Find the object name before the dot
+                    const objectMatch = beforeWord.match(/(\w+)\s*\.\s*$/);
+                    if (objectMatch) {
+                        const objectName = objectMatch[1];
+                        console.log(`🔍 Method ${word} called on object ${objectName}`);
+                        // Just use the method name - the dependency service will find it
+                        targetElement = word;
+                    }
+                } else {
+                    // Additional check: look for method calls in a different pattern
+                    // Handle cases like "calc.add(" where we might be hovering over "add"
+                    const methodCallPattern = /(\w+)\s*\.\s*(\w+)\s*\(/;
+                    const methodMatch = lineText.match(methodCallPattern);
+                    if (methodMatch && methodMatch[2] === word) {
+                        console.log(`🔍 Alternative method detection: ${word} called on ${methodMatch[1]}`);
+                        targetElement = word;
+                    }
+                }
+
+                console.log(`🔍 Requesting documentation for targetElement: "${targetElement}" in file: "${relativePath}"`);
+                const docInfo = await this.getDocumentationInfo(relativePath, targetElement);
                 if (docInfo) {
-                    return await this.createDocumentationHover(word, docInfo, relativePath);
+                    console.log(`✅ Got documentation for ${targetElement}`);
+                    return await this.createDocumentationHover(targetElement, docInfo.documentation, docInfo.sourceFile);
+                } else {
+                    console.log(`❌ No documentation found for ${targetElement}, creating fallback hover`);
+                    // Create a fallback hover with just the element name and navigation
+                    return await this.createDocumentationHover(targetElement, `No documentation available for ${targetElement}`, relativePath);
                 }
             }
         } catch (error) {
@@ -162,7 +242,8 @@ export class PyTestEmbedHoverProvider implements vscode.HoverProvider {
         });
     }
     
-    private async getDocumentationInfo(filePath: string, elementName: string): Promise<string | null> {
+    private async getDocumentationInfo(filePath: string, elementName: string): Promise<{documentation: string, sourceFile: string} | null> {
+        // Always use dependency service for consistency
         return new Promise((resolve, reject) => {
             const ws = new WebSocket('ws://localhost:8770');
 
@@ -178,7 +259,7 @@ export class PyTestEmbedHoverProvider implements vscode.HoverProvider {
                     file_path: filePath,
                     element_name: elementName
                 };
-                console.log(`📖 Requesting documentation for ${elementName}`);
+                console.log(`📖 Requesting documentation for ${elementName} from dependency service`);
                 ws.send(JSON.stringify(request));
             });
 
@@ -191,7 +272,10 @@ export class PyTestEmbedHoverProvider implements vscode.HoverProvider {
                     if (response.type === 'element_documentation') {
                         ws.close();
                         console.log(`✅ Got documentation for ${elementName}: ${response.documentation ? 'found' : 'not found'}`);
-                        resolve(response.documentation || null);
+
+                        // Find the actual source file for this element
+                        const sourceFile = response.source_file || filePath;
+                        resolve(response.documentation ? {documentation: response.documentation, sourceFile} : null);
                     } else if (response.type === 'error') {
                         ws.close();
                         console.log(`❌ Error getting documentation: ${response.message}`);
@@ -210,6 +294,97 @@ export class PyTestEmbedHoverProvider implements vscode.HoverProvider {
                 reject(error);
             });
         });
+    }
+
+    private isLikelyImportedElement(word: string, document: vscode.TextDocument): boolean {
+        const text = document.getText();
+        const lines = text.split('\n');
+
+        for (const line of lines) {
+            const trimmed = line.trim();
+
+            // Check for "from module import word" patterns
+            if (trimmed.includes('import') && trimmed.includes(word)) {
+                const fromImportMatch = trimmed.match(/^from\s+[\w.]+\s+import\s+(.+)$/);
+                if (fromImportMatch) {
+                    const imports = fromImportMatch[1].split(',').map(imp => imp.trim());
+                    for (const imp of imports) {
+                        const cleanImport = imp.split(' as ')[0].trim();
+                        if (cleanImport === word) {
+                            return true;
+                        }
+                    }
+                }
+
+                // Check for "import module" then "module.word" usage
+                if (trimmed.startsWith('import ') && text.includes(`.${word}`)) {
+                    return true;
+                }
+            }
+        }
+
+        // Also check if the word appears in variable assignments that might be imported classes
+        // e.g., "derp_instance = Derp()" where Derp is imported
+        const assignmentPattern = new RegExp(`\\b${word}\\s*=\\s*\\w+\\(`, 'g');
+        if (assignmentPattern.test(text)) {
+            return true;
+        }
+
+        // Check if word appears in method calls that suggest it's an instance
+        // e.g., "derp_instance.foo()"
+        const methodCallPattern = new RegExp(`\\b${word}\\.\\w+\\(`, 'g');
+        if (methodCallPattern.test(text)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private async findElementAcrossFiles(elementName: string): Promise<{file_path: string, line_number: number} | null> {
+        try {
+            const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+            if (!workspaceFolder) {
+                return null;
+            }
+
+            // Search for Python files in the workspace
+            const pythonFiles = await vscode.workspace.findFiles('**/*.py', '**/node_modules/**');
+
+            for (const fileUri of pythonFiles) {
+                try {
+                    const document = await vscode.workspace.openTextDocument(fileUri);
+                    const text = document.getText();
+                    const lines = text.split('\n');
+
+                    // Search for function or class definition
+                    for (let i = 0; i < lines.length; i++) {
+                        const line = lines[i].trim();
+
+                        if (line.startsWith(`def ${elementName}(`) ||
+                            line.startsWith(`class ${elementName}(`) ||
+                            line.startsWith(`class ${elementName}:`)) {
+
+                            const relativePath = require('path').relative(workspaceFolder.uri.fsPath, fileUri.fsPath);
+                            console.log(`✅ Found ${elementName} in ${relativePath} at line ${i + 1}`);
+                            return {
+                                file_path: relativePath,
+                                line_number: i + 1
+                            };
+                        }
+                    }
+                } catch (error) {
+                    // Skip files that can't be read
+                    continue;
+                }
+            }
+
+            console.log(`❌ Could not find ${elementName} in any workspace files`);
+            return null;
+
+        } catch (error) {
+            console.log(`❌ Error searching across files for ${elementName}:`, error);
+            return null;
+        }
     }
 
     private async getElementLocation(filePath: string, elementName: string, lineNumber?: number): Promise<{file_path: string, line_number: number} | null> {
@@ -305,15 +480,22 @@ export class PyTestEmbedHoverProvider implements vscode.HoverProvider {
         const markdown = new vscode.MarkdownString();
         markdown.isTrusted = true;
 
-        // Try to get the element location for navigation
-        const elementInfo = await this.getElementLocation(filePath, elementName);
+        // Try to get the element location for navigation - first in current file, then across files
+        let elementInfo = await this.getElementLocation(filePath, elementName);
+
+        // If not found in current file, search across workspace
+        if (!elementInfo) {
+            elementInfo = await this.findElementAcrossFiles(elementName);
+        }
 
         if (elementInfo) {
             // Use a simpler command URI format
             const navigateUri = vscode.Uri.parse(`command:pytestembed.navigateToElement?${encodeURIComponent(JSON.stringify(elementInfo))}`);
             markdown.appendMarkdown(`**📖 [${elementName}](${navigateUri}) 🔗**\n\n`);
+            console.log(`🔗 Created navigation link for ${elementName}:`, elementInfo);
         } else {
             markdown.appendMarkdown(`**📖 ${elementName}**\n\n`);
+            console.log(`❌ No navigation link for ${elementName} - element not found`);
         }
 
         markdown.appendMarkdown(`${documentation}\n`);
@@ -333,14 +515,30 @@ export class PyTestEmbedHoverProvider implements vscode.HoverProvider {
 
             for (const dep of info.enhanced_dependencies) {
                 // Find the correct location using our file search method
-                const correctLocation = await this.getElementLocation(dep.file_path, dep.name);
-                const depLocation = correctLocation || {file_path: dep.file_path, line_number: dep.line_number};
+                let depLocation = await this.getElementLocation(dep.file_path, dep.name);
+
+                // If not found in the specified file, search across workspace for cross-file elements
+                if (!depLocation) {
+                    depLocation = await this.findElementAcrossFiles(dep.name);
+                }
+
+                // Fallback to original location
+                depLocation = depLocation || {file_path: dep.file_path, line_number: dep.line_number};
+
                 const navigateUri = vscode.Uri.parse(`command:pytestembed.navigateToElement?${encodeURIComponent(JSON.stringify(depLocation))}`);
                 console.log(`🔗 Creating dependency link for ${dep.name}:`, depLocation);
+
+                // Get documentation for cross-file elements
+                let documentation = dep.documentation;
+                if (!documentation) {
+                    const crossFileDoc = await this.getDocumentationInfo(depLocation.file_path, dep.name);
+                    documentation = crossFileDoc?.documentation || '';
+                }
+
                 markdown.appendMarkdown(`• [**${dep.name}**](${navigateUri}) (${dep.element_type}) 🔗`);
 
-                if (dep.documentation) {
-                    markdown.appendMarkdown(`  \n  📝 ${dep.documentation}`);
+                if (documentation) {
+                    markdown.appendMarkdown(`  \n  📝 ${documentation}`);
                 }
 
                 markdown.appendMarkdown(`\n\n`);
@@ -353,14 +551,30 @@ export class PyTestEmbedHoverProvider implements vscode.HoverProvider {
 
             for (const dep of info.enhanced_dependents) {
                 // Find the correct location using our file search method
-                const correctLocation = await this.getElementLocation(dep.file_path, dep.name);
-                const depLocation = correctLocation || {file_path: dep.file_path, line_number: dep.line_number};
+                let depLocation = await this.getElementLocation(dep.file_path, dep.name);
+
+                // If not found in the specified file, search across workspace for cross-file elements
+                if (!depLocation) {
+                    depLocation = await this.findElementAcrossFiles(dep.name);
+                }
+
+                // Fallback to original location
+                depLocation = depLocation || {file_path: dep.file_path, line_number: dep.line_number};
+
                 const navigateUri = vscode.Uri.parse(`command:pytestembed.navigateToElement?${encodeURIComponent(JSON.stringify(depLocation))}`);
                 console.log(`🔗 Creating dependent link for ${dep.name}:`, depLocation);
+
+                // Get documentation for cross-file elements
+                let documentation = dep.documentation;
+                if (!documentation) {
+                    const crossFileDoc = await this.getDocumentationInfo(depLocation.file_path, dep.name);
+                    documentation = crossFileDoc?.documentation || '';
+                }
+
                 markdown.appendMarkdown(`• [**${dep.name}**](${navigateUri}) (${dep.element_type}) 🔗`);
 
-                if (dep.documentation) {
-                    markdown.appendMarkdown(`  \n  📝 ${dep.documentation}`);
+                if (documentation) {
+                    markdown.appendMarkdown(`  \n  📝 ${documentation}`);
                 }
 
                 markdown.appendMarkdown(`\n\n`);

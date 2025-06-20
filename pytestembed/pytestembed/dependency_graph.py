@@ -112,6 +112,7 @@ class CodeDependencyGraph:
         """Extract all doc: blocks from a PyTestEmbed file and map them to functions/classes."""
         lines = content.split('\n')
         documentation_map = {}
+        current_class = None
 
         i = 0
         while i < len(lines):
@@ -127,6 +128,11 @@ class CodeDependencyGraph:
                 else:
                     name = stripped_line.split('class ')[1].split('(')[0].split(':')[0].strip()
                     element_type = 'class'
+                    # Update current class context
+                    element_indent = len(line) - len(line.lstrip())
+                    if element_indent == 0:  # Top-level class
+                        current_class = name
+                    # If it's an indented class, we might be in a nested situation, but for now keep the current class
 
                 element_indent = len(line) - len(line.lstrip())  # Indentation of the def/class line
 
@@ -175,7 +181,12 @@ class CodeDependencyGraph:
 
                     doc_text = "\n".join(doc_content).strip()
                     if doc_text:
+                        # Store with simple name
                         documentation_map[name] = doc_text
+                        # For methods, also store with class.method key
+                        if element_type == 'function' and current_class and element_indent > 0:
+                            class_method_key = f"{current_class}.{name}"
+                            documentation_map[class_method_key] = doc_text
 
             i += 1
 
@@ -255,7 +266,12 @@ class CodeDependencyGraph:
     
     def _resolve_call(self, call: str, calling_element: CodeElement) -> Optional[str]:
         """Resolve a function call to an actual element ID."""
-        # Try different resolution strategies
+        # Handle object.method calls
+        if '.' in call:
+            obj_name, method_name = call.split('.', 1)
+            return self._resolve_method_call(obj_name, method_name, calling_element)
+
+        # Try different resolution strategies for simple calls
 
         # 1. Same file, same class (for method calls within the same class)
         if calling_element.parent_class:
@@ -276,11 +292,110 @@ class CodeDependencyGraph:
                 element.name == call):
                 return element_id
 
-        # 4. Imported function (would need import analysis)
-        # TODO: Implement import resolution
+        # 4. Cross-file imports - check all files for this element
+        for element_id, element in self.elements.items():
+            if element.name == call and element.file_path != calling_element.file_path:
+                # Check if this element is imported in the calling file
+                if self._is_element_imported(calling_element.file_path, element.file_path, call):
+                    return element_id
 
         return None
-    
+
+    def _resolve_method_call(self, obj_name: str, method_name: str, calling_element: CodeElement) -> Optional[str]:
+        """Resolve a method call like obj.method() to find the actual method."""
+        try:
+            # Read the calling file to find the object's class
+            full_path = self.workspace_path / calling_element.file_path
+            with open(full_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            # Look for variable assignment to determine the class
+            lines = content.split('\n')
+            class_name = None
+
+            for line in lines:
+                line = line.strip()
+                # Look for patterns like: obj_name = ClassName()
+                if f"{obj_name} = " in line and "(" in line:
+                    # Extract class name from assignment
+                    parts = line.split('=', 1)
+                    if len(parts) == 2:
+                        right_side = parts[1].strip()
+                        # Extract class name before parentheses
+                        if '(' in right_side:
+                            potential_class = right_side.split('(')[0].strip()
+                            # Check if this is a valid class name (starts with capital)
+                            if potential_class and potential_class[0].isupper():
+                                class_name = potential_class
+                                break
+
+            if not class_name:
+                return None
+
+            # Now look for the method in that class
+            # First check same file
+            same_file_method = f"{calling_element.file_path}:{class_name}.{method_name}"
+            if same_file_method in self.elements:
+                return same_file_method
+
+            # Then check other files (cross-file)
+            for element_id, element in self.elements.items():
+                if (element.element_type == 'method' and
+                    element.name == method_name and
+                    element.parent_class == class_name):
+                    # Check if the class is imported
+                    if self._is_element_imported(calling_element.file_path, element.file_path, class_name):
+                        return element_id
+
+            return None
+
+        except Exception as e:
+            print(f"⚠️ Error resolving method call {obj_name}.{method_name}: {e}")
+            return None
+
+    def _is_element_imported(self, calling_file: str, target_file: str, element_name: str) -> bool:
+        """Check if an element from target_file is imported in calling_file."""
+        try:
+            full_path = self.workspace_path / calling_file
+            with open(full_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            # Get module name from target file (remove .py extension)
+            target_module = target_file.replace('.py', '').replace('/', '.')
+
+            lines = content.split('\n')
+            for line in lines:
+                line = line.strip()
+
+                # Check for "from module import element" patterns
+                if line.startswith('from ') and ' import ' in line:
+                    parts = line.split(' import ')
+                    if len(parts) == 2:
+                        module_part = parts[0].replace('from ', '').strip()
+                        import_part = parts[1].strip()
+
+                        # Check if importing from the target module
+                        if module_part == target_module or module_part.endswith(target_module):
+                            # Check if importing the specific element
+                            imports = [imp.strip() for imp in import_part.split(',')]
+                            for imp in imports:
+                                clean_import = imp.split(' as ')[0].strip()
+                                if clean_import == element_name:
+                                    return True
+
+                # Check for "import module" then usage as "module.element"
+                if line.startswith('import ') and target_module in line:
+                    # Check if the element is used as module.element in the file
+                    module_name = target_module.split('.')[-1]  # Get last part of module path
+                    if f"{module_name}.{element_name}" in content:
+                        return True
+
+            return False
+
+        except Exception as e:
+            print(f"⚠️ Error checking imports in {calling_file}: {e}")
+            return False
+
     def _identify_dead_code(self) -> None:
         """Identify code elements that are never called (dead code)."""
         called_elements = set()
@@ -482,7 +597,13 @@ class CodeElementVisitor(ast.NodeVisitor):
             docstring=ast.get_docstring(node)
         )
         # Add documentation after creation
-        element.documentation = self.documentation_map.get(node.name, "")
+        # For methods, try both the method name and the full class.method path
+        doc_key = node.name
+        if self.current_class:
+            class_method_key = f"{self.current_class}.{node.name}"
+            element.documentation = self.documentation_map.get(class_method_key, self.documentation_map.get(doc_key, ""))
+        else:
+            element.documentation = self.documentation_map.get(doc_key, "")
         
         self.graph.elements[element_id] = element
         self.graph.file_elements[self.file_path].append(element_id)
@@ -507,8 +628,17 @@ class FunctionCallVisitor(ast.NodeVisitor):
     def visit_Call(self, node: ast.Call) -> None:
         """Visit a function call."""
         if isinstance(node.func, ast.Name):
+            # Direct function call: foo()
             self.calls.add(node.func.id)
         elif isinstance(node.func, ast.Attribute):
+            # Method call: obj.method() or module.function()
             self.calls.add(node.func.attr)
-        
+
+            # Also track the object/module being called on
+            if isinstance(node.func.value, ast.Name):
+                # For obj.method(), track both the method and potential class instantiation
+                obj_name = node.func.value.id
+                # This could be an instance of a class, track the method call
+                self.calls.add(f"{obj_name}.{node.func.attr}")
+
         self.generic_visit(node)
