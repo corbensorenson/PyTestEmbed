@@ -22,6 +22,10 @@ PyTestEmbed revolutionizes Python development by combining embedded testing, int
 - **Smart folding** - Collapse functions with their test/doc blocks
 - **Quick actions** - Generate tests/docs with lightbulb menus
 - **Problems integration** - Test results in IDE's Problems panel
+- **Hover tooltips** - Rich dependency information and documentation on hover
+- **Split navigation** - Open definitions in split editor for side-by-side viewing
+- **Double-click navigation** - Quick access to function/class definitions
+- **Context menus** - Right-click PyTestEmbed menu with toggle options
 
 ### 🤖 **AI-Powered Development**
 - **Smart test generation** - AI creates comprehensive test cases
@@ -33,9 +37,12 @@ PyTestEmbed revolutionizes Python development by combining embedded testing, int
 ### 🕸️ **Code Intelligence**
 - **Dependency analysis** - Maps all function and class relationships
 - **Dead code detection** - Identifies unused code across projects
-- **Cross-file navigation** - Jump between related code elements
-- **Interactive visualization** - Explore dependencies with hover tooltips
+- **Cross-file navigation** - Jump between related code elements instantly
+- **Interactive hover tooltips** - Rich dependency information with navigation links
+- **Split editor navigation** - View definitions side-by-side without losing context
+- **Double-click navigation** - Quick access to function/class definitions
 - **Impact analysis** - Shows which tests to run when code changes
+- **Real-time dependency tracking** - Live updates as you modify code
 
 ### ⚡ **Live Development Experience**
 - **WebSocket integration** - Real-time communication with IDE
@@ -89,6 +96,11 @@ A cutting-edge VSCode extension providing:
 - **🔧 Integrated Controls**: Status bar buttons and toolbar integration
 - **📁 Smart Code Folding**: Collapse test/doc blocks for cleaner views
 - **🚨 Problems Integration**: Test results in VSCode's Problems panel
+- **🔍 Rich Hover Tooltips**: Dependency information and documentation on hover
+- **📱 Split Navigation**: Open definitions in split editor with one click
+- **🖱️ Double-Click Navigation**: Quick access to function/class definitions
+- **🎛️ Context Menus**: Right-click PyTestEmbed menu with feature toggles
+- **⚙️ Configurable Features**: Toggle double-click navigation and other preferences
 
 ## ✨ Core Capabilities
 
@@ -141,6 +153,17 @@ test:
 - **Real-time feedback**: See test results instantly in your IDE
 - **Smart test selection**: Only runs tests affected by your changes
 - **Live coverage**: Watch test coverage update as you code
+
+### 🧭 **Advanced Navigation Features**
+- **Rich hover tooltips**: Hover over any function/class to see:
+  - Dependencies and dependents with counts
+  - Cross-file documentation and usage
+  - Navigation links to definitions
+  - Split editor links for side-by-side viewing
+- **Double-click navigation**: Double-click any function/class name to open definition in split editor
+- **Split editor support**: View code side-by-side without losing your current context
+- **Cross-file navigation**: Jump between related code elements across your entire project
+- **Configurable preferences**: Toggle navigation features via right-click menu
 
 ### 🔄 **Complete Workflow**
 - **Development**: Write code with embedded tests and docs + AI assistance
@@ -275,7 +298,16 @@ asyncio.run(export_graph())
 # Open dependency_visualizer.html in browser to explore your code relationships
 ```
 
-### 7. Normal Execution
+### 7. Explore Navigation Features
+
+With the VSCode extension installed:
+
+- **Hover tooltips**: Hover over any function/class name to see rich dependency information
+- **Split navigation**: Click the "📱 Split" links in hover tooltips to open definitions side-by-side
+- **Double-click navigation**: Double-click any function/class name to open in split editor
+- **Toggle features**: Right-click → PyTestEmbed → Toggle Double-Click Navigation
+
+### 8. Normal Execution
 
 ```bash
 python example.py  # Runs normally, test: and doc: blocks are ignored
@@ -479,6 +511,13 @@ npm test
 - [x] **Linting Integration**: Configuration templates for both IDEs
 - [x] **Comprehensive Testing**: 30+ test cases including converter tests
 - [x] **Project-local Temp Files**: No system temp directory usage
+- [x] **Rich Hover Tooltips**: Dependency information and documentation on hover
+- [x] **Split Navigation**: Open definitions in split editor for side-by-side viewing
+- [x] **Double-Click Navigation**: Quick access to function/class definitions
+- [x] **Cross-File Navigation**: Jump between related code elements across projects
+- [x] **Context Menus**: Right-click PyTestEmbed menu with feature toggles
+- [x] **Configurable Navigation**: Toggle double-click navigation and other preferences
+- [x] **Live Dependency Tracking**: Real-time dependency analysis and navigation
 
 ### 🔄 In Progress
 - [ ] **Enhanced AI Documentation**: Full local AI model integration
@@ -582,6 +621,25 @@ Create `.pytestembed.json` in your project root:
     "ai_enabled": true
 }
 ```
+
+### VSCode Extension Configuration
+Configure PyTestEmbed features in VSCode settings:
+```json
+{
+    "pytestembed.doubleClickNavigation": true,
+    "pytestembed.suppressSyntaxErrors": true,
+    "pytestembed.autoConfigureLinter": true,
+    "pytestembed.pythonInterpreter": "python",
+    "pytestembed.aiProvider": "lmstudio"
+}
+```
+
+**Available Settings:**
+- `doubleClickNavigation`: Enable/disable double-click navigation to split editor
+- `suppressSyntaxErrors`: Suppress Python syntax errors in test:/doc: blocks
+- `autoConfigureLinter`: Automatically configure Python linter for PyTestEmbed syntax
+- `pythonInterpreter`: Path to Python interpreter for live testing
+- `aiProvider`: AI provider for smart generation ("ollama" or "lmstudio")
 
 ### AI Provider Setup
 
