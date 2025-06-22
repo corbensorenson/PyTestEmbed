@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 from typing import Dict, List, Optional
 from .dependency_graph import CodeDependencyGraph
+from .file_watcher import FileWatcherService, FileChangeEvent
 
 
 class DependencyService:
@@ -23,18 +24,31 @@ class DependencyService:
         self.port = port
         self.dependency_graph = CodeDependencyGraph(workspace_path)
         self.clients = set()
+
+        # Modular file watcher service
+        self.file_watcher = FileWatcherService(workspace_path)
+        self.file_watcher.subscribe('file_changed', self.on_file_changed)
         
     async def start(self):
         """Start the dependency service."""
         print(f"🔗 Starting Dependency Service on port {self.port}")
-        
+
+        # Store the event loop for file watcher
+        self._loop = asyncio.get_running_loop()
+
         # Build initial dependency graph
         self.dependency_graph.build_graph()
-        
+
+        # Start modular file watcher
+        self.file_watcher.start_watching(self._loop)
+
         # Start WebSocket server
-        async with websockets.serve(self.handle_client, "localhost", self.port):
-            print(f"✅ Dependency Service running at ws://localhost:{self.port}")
-            await asyncio.Future()  # Run forever
+        try:
+            async with websockets.serve(self.handle_client, "localhost", self.port):
+                print(f"✅ Dependency Service running at ws://localhost:{self.port}")
+                await asyncio.Future()  # Run forever
+        finally:
+            self.file_watcher.stop_watching()
     
     async def handle_client(self, websocket, path):
         """Handle a client connection."""
@@ -83,7 +97,47 @@ class DependencyService:
             )
         else:
             await self.send_error(websocket, f"Unknown command: {command}")
-    
+
+    async def on_file_changed(self, event: FileChangeEvent):
+        """Callback for file change events from the modular file watcher."""
+        changed_file = event.file_path
+        print(f"🔗 Dependency service detected file change: {changed_file}")
+
+        try:
+            # Update dependency graph for the changed file
+            full_path = str(self.workspace_path / changed_file)
+            self.dependency_graph.update_file_dependencies(full_path)
+
+            # Broadcast dependency graph update to connected clients
+            await self.broadcast({
+                'type': 'dependency_graph_updated',
+                'data': {
+                    'changed_file': changed_file,
+                    'timestamp': asyncio.get_event_loop().time()
+                }
+            })
+
+            print(f"✅ Dependency graph updated for {changed_file}")
+
+        except Exception as e:
+            print(f"⚠️ Error updating dependencies for {changed_file}: {e}")
+
+    async def broadcast(self, message: dict):
+        """Broadcast a message to all connected clients."""
+        if self.clients:
+            message_str = json.dumps(message)
+            disconnected_clients = []
+
+            for client in self.clients:
+                try:
+                    await client.send(message_str)
+                except websockets.exceptions.ConnectionClosed:
+                    disconnected_clients.append(client)
+
+            # Remove disconnected clients
+            for client in disconnected_clients:
+                self.clients.discard(client)
+
     async def send_dependency_info(self, websocket, file_path: str, element_name: str, line_number: int):
         """Send dependency information for a code element."""
         try:

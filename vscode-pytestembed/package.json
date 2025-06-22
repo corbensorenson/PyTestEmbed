@@ -75,6 +75,12 @@
     ],
     "commands": [
       {
+        "command": "pytestembed.toggleDependencyServer",
+        "title": "Toggle Dependency Graph Server",
+        "category": "PyTestEmbed",
+        "icon": "$(graph)"
+      },
+      {
         "command": "pytestembed.toggleDoubleClickNavigation",
         "title": "Toggle Double-Click Navigation",
         "category": "PyTestEmbed",

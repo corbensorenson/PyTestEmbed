@@ -18,6 +18,10 @@ export let state: ExtensionState = {
     liveTestSocket: null,
     liveTestProcess: null,
     
+    // Dependency server state
+    dependencyServerEnabled: false,
+    dependencyServerProcess: null,
+
     // MCP server state
     mcpServerEnabled: false,
     mcpServerProcess: null,
@@ -26,7 +30,7 @@ export let state: ExtensionState = {
     testResults: new Map(),
     currentTestProgress: { current: 0, total: 0 },
 
-    // Dependency information cache
+    // Dependency cache for fast hover display (updated by Python server)
     dependencyCache: new Map(),
     
     // UI components (will be initialized in activate)
@@ -34,6 +38,7 @@ export let state: ExtensionState = {
     diagnosticCollection: null as any,
     testProgressStatusBar: null as any,
     liveTestServerStatusBar: null as any,
+    dependencyServerStatusBar: null as any,
     mcpServerStatusBar: null as any,
     serverStatusCheckInterval: undefined,
     documentChangeTimeout: undefined,
@@ -168,7 +173,11 @@ export function cleanupState() {
     if (state.liveTestProcess) {
         state.liveTestProcess.kill();
     }
-    
+
+    if (state.dependencyServerProcess) {
+        state.dependencyServerProcess.kill();
+    }
+
     if (state.mcpServerProcess) {
         state.mcpServerProcess.kill();
     }

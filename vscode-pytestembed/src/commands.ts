@@ -1,87 +1,16 @@
 /**
- * Command registration and handlers for PyTestEmbed VSCode Extension
+ * Commands for PyTestEmbed VSCode Extension
  */
 
 import * as vscode from 'vscode';
-import * as path from 'path';
+import { startLiveTesting, stopLiveTesting, requestAIGeneration, requestAIEnhancement, startDependencyService } from './liveClient';
+import { updateLiveTestStatus, updateDependencyStatus, updateMcpStatus } from './statusBar';
 import { state } from './state';
-import { startLiveTesting, stopLiveTesting, runIndividualTest } from './liveTesting';
-import { runTestAtCursor, showTestResultsPanel } from './testResults';
-import { startMcpServer, stopMcpServer } from './mcpServer';
-import { toggleBlockFolding, foldFunctionWithBlocks } from './folding';
-import { openPyTestEmbedPanel } from './panel';
-import { BlockType } from './types';
 
 /**
- * Register all PyTestEmbed commands
+ * Register all commands
  */
 export function registerCommands(context: vscode.ExtensionContext) {
-    // Toggle commands
-    context.subscriptions.push(
-        vscode.commands.registerCommand('pytestembed.toggleTestBlocks', () => {
-            state.testBlocksVisible = !state.testBlocksVisible;
-            toggleBlocksOfType('test', state.testBlocksVisible);
-            updateStatusBar();
-        })
-    );
-
-    context.subscriptions.push(
-        vscode.commands.registerCommand('pytestembed.toggleDocBlocks', () => {
-            state.docBlocksVisible = !state.docBlocksVisible;
-            toggleBlocksOfType('doc', state.docBlocksVisible);
-            updateStatusBar();
-        })
-    );
-
-    context.subscriptions.push(
-        vscode.commands.registerCommand('pytestembed.showAllBlocks', () => {
-            state.testBlocksVisible = true;
-            state.docBlocksVisible = true;
-            showAllBlocks();
-            updateStatusBar();
-        })
-    );
-
-    context.subscriptions.push(
-        vscode.commands.registerCommand('pytestembed.hideAllBlocks', () => {
-            state.testBlocksVisible = false;
-            state.docBlocksVisible = false;
-            hideAllBlocks();
-            updateStatusBar();
-        })
-    );
-
-    // Execution commands
-    context.subscriptions.push(
-        vscode.commands.registerCommand('pytestembed.runTests', () => {
-            runPyTestEmbedCommand('--test');
-        })
-    );
-
-    context.subscriptions.push(
-        vscode.commands.registerCommand('pytestembed.generateDocs', () => {
-            runPyTestEmbedCommand('--doc');
-        })
-    );
-
-    context.subscriptions.push(
-        vscode.commands.registerCommand('pytestembed.runWithoutBlocks', () => {
-            runPythonWithoutBlocks();
-        })
-    );
-
-    context.subscriptions.push(
-        vscode.commands.registerCommand('pytestembed.runIgnoringTests', () => {
-            runPythonFileIgnoringTests();
-        })
-    );
-
-    context.subscriptions.push(
-        vscode.commands.registerCommand('pytestembed.openOutputPanel', () => {
-            state.outputChannel.show();
-        })
-    );
-
     // Live testing commands
     context.subscriptions.push(
         vscode.commands.registerCommand('pytestembed.startLiveTesting', () => {
@@ -99,263 +28,149 @@ export function registerCommands(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('pytestembed.toggleLiveTesting', () => {
             if (state.liveTestingEnabled) {
                 stopLiveTesting();
+                updateLiveTestStatus(false);
             } else {
                 startLiveTesting();
+                updateLiveTestStatus(true);
             }
         })
     );
 
-    // Test execution commands
+    // Service management commands
     context.subscriptions.push(
-        vscode.commands.registerCommand('pytestembed.runTestAtCursor', () => {
-            runTestAtCursor();
+        vscode.commands.registerCommand('pytestembed.toggleDependencyService', () => {
+            startDependencyService();
         })
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('pytestembed.runIndividualTest', (filePath: string, lineNumber: number) => {
-            runIndividualTest(filePath, lineNumber);
+        vscode.commands.registerCommand('pytestembed.toggleMcpService', () => {
+            // Send command to Python server to toggle MCP service
+            vscode.window.showInformationMessage('MCP service toggle - handled by Python server');
+        })
+    );
+
+    // AI Generation commands (inline CodeLens)
+    context.subscriptions.push(
+        vscode.commands.registerCommand('pytestembed.generateTestsInline', (uri: vscode.Uri, lineNumber: number) => {
+            requestAIGeneration(uri, lineNumber, 'test');
         })
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('pytestembed.showTestResults', () => {
-            showTestResultsPanel();
-        })
-    );
-
-    // MCP server commands
-    context.subscriptions.push(
-        vscode.commands.registerCommand('pytestembed.startMcpServer', () => {
-            startMcpServer();
+        vscode.commands.registerCommand('pytestembed.generateDocsInline', (uri: vscode.Uri, lineNumber: number) => {
+            requestAIGeneration(uri, lineNumber, 'doc');
         })
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('pytestembed.stopMcpServer', () => {
-            stopMcpServer();
+        vscode.commands.registerCommand('pytestembed.generateBothInline', (uri: vscode.Uri, lineNumber: number) => {
+            requestAIGeneration(uri, lineNumber, 'both');
         })
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('pytestembed.toggleMcpServer', () => {
-            if (state.mcpServerEnabled) {
-                stopMcpServer();
-            } else {
-                startMcpServer();
-            }
+        vscode.commands.registerCommand('pytestembed.showDependenciesInline', (uri: vscode.Uri, lineNumber: number, elementName: string) => {
+            // Show dependency information for the element
+            vscode.window.showInformationMessage(`Dependencies for ${elementName} - feature coming soon`);
         })
     );
 
-    // Smart generation commands
+    // Enhanced AI generation commands for existing blocks
     context.subscriptions.push(
-        vscode.commands.registerCommand('pytestembed.generateBlocks', () => {
-            generateSmartBlocks('both');
-        })
-    );
-
-    context.subscriptions.push(
-        vscode.commands.registerCommand('pytestembed.generateTestsOnly', () => {
-            generateSmartBlocks('test');
+        vscode.commands.registerCommand('pytestembed.generateAdditionalTests', (uri: vscode.Uri, lineNumber: number) => {
+            requestAIEnhancement(uri, lineNumber, 'generate_additional_tests');
         })
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('pytestembed.generateDocsOnly', () => {
-            generateSmartBlocks('doc');
-        })
-    );
-
-    // Quick Actions commands
-    context.subscriptions.push(
-        vscode.commands.registerCommand('pytestembed.generateBlocksAtLine', (uri: vscode.Uri, lineNumber: number, type: BlockType) => {
-            generateBlocksAtLine(uri, lineNumber, type);
+        vscode.commands.registerCommand('pytestembed.regenerateTests', (uri: vscode.Uri, lineNumber: number) => {
+            requestAIEnhancement(uri, lineNumber, 'regenerate_tests');
         })
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('pytestembed.quickFixFunction', (uri: vscode.Uri, lineNumber: number) => {
-            quickFixFunction(uri, lineNumber);
-        })
-    );
-
-    // Legacy commands for backward compatibility
-    context.subscriptions.push(
-        vscode.commands.registerCommand('pytestembed.foldTestBlocks', () => {
-            foldBlocksOfType('test');
+        vscode.commands.registerCommand('pytestembed.improveTestCoverage', (uri: vscode.Uri, lineNumber: number) => {
+            requestAIEnhancement(uri, lineNumber, 'improve_test_coverage');
         })
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('pytestembed.foldDocBlocks', () => {
-            foldBlocksOfType('doc');
-        })
-    );
-
-    // PyTestEmbed panel commands
-    context.subscriptions.push(
-        vscode.commands.registerCommand('pytestembed.openPanel', () => {
-            openPyTestEmbedPanel(context);
+        vscode.commands.registerCommand('pytestembed.regenerateDocs', (uri: vscode.Uri, lineNumber: number) => {
+            requestAIEnhancement(uri, lineNumber, 'regenerate_docs');
         })
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('pytestembed.clearPanelMessages', () => {
-            import('./state').then(({ clearPanelMessages }) => {
-                clearPanelMessages();
-            });
+        vscode.commands.registerCommand('pytestembed.addMoreDocDetail', (uri: vscode.Uri, lineNumber: number) => {
+            requestAIEnhancement(uri, lineNumber, 'add_more_doc_detail');
         })
     );
 
-    // PyTestEmbed-specific commands
     context.subscriptions.push(
-        vscode.commands.registerCommand('pytestembed.configureLinter', () => {
-            configurePyTestEmbedLinter();
+        vscode.commands.registerCommand('pytestembed.addDocExamples', (uri: vscode.Uri, lineNumber: number) => {
+            requestAIEnhancement(uri, lineNumber, 'add_doc_examples');
         })
     );
 
     // Navigation commands
     context.subscriptions.push(
-        vscode.commands.registerCommand('pytestembed.navigateToDefinition', (args: string) => {
-            navigateToDefinition(args);
+        vscode.commands.registerCommand('pytestembed.navigateToDefinition', (args: any) => {
+            navigateToElement(args, false);
         })
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('pytestembed.navigateToElement', (...allArgs: any[]) => {
-            console.log('🔗🔗🔗 NAVIGATION COMMAND CALLED! 🔗🔗🔗');
-            console.log('🔗 RAW COMMAND ARGS - Length:', allArgs.length);
-            console.log('🔗 RAW COMMAND ARGS - Full array:', allArgs);
-
-            for (let i = 0; i < allArgs.length; i++) {
-                console.log(`🔗 Arg[${i}]:`, allArgs[i], 'type:', typeof allArgs[i]);
-                if (typeof allArgs[i] === 'string') {
-                    console.log(`🔗 Arg[${i}] as string:`, JSON.stringify(allArgs[i]));
-                }
-            }
-
-            // Try different approaches to extract the arguments
-            let navigationArgs: any = null;
-
-            if (allArgs.length === 0) {
-                console.log('❌ No arguments passed');
-                vscode.window.showErrorMessage('No navigation arguments provided');
-                return;
-            }
-
-            const firstArg = allArgs[0];
-            console.log('🔗 Processing first arg:', firstArg, 'type:', typeof firstArg);
-
-            if (typeof firstArg === 'string') {
-                console.log('🔗 Attempting to parse string argument...');
-                try {
-                    navigationArgs = JSON.parse(firstArg);
-                    console.log('🔗 Successfully parsed string to object:', navigationArgs);
-                } catch (error) {
-                    console.log('❌ Failed to parse string as JSON:', error);
-                    console.log('❌ Raw string was:', JSON.stringify(firstArg));
-                    vscode.window.showErrorMessage(`Failed to parse navigation arguments: ${error}`);
-                    return;
-                }
-            } else if (Array.isArray(firstArg)) {
-                console.log('🔗 First arg is array, using first element...');
-                navigationArgs = firstArg[0];
-                console.log('🔗 Extracted from array:', navigationArgs);
-            } else if (firstArg && typeof firstArg === 'object') {
-                console.log('🔗 First arg is object, using directly...');
-                navigationArgs = firstArg;
-            } else {
-                console.log('❌ Unrecognized argument format');
-                vscode.window.showErrorMessage(`Unrecognized navigation argument format: ${typeof firstArg}`);
-                return;
-            }
-
-            console.log('🔗 Final navigation args:', navigationArgs);
-            console.log('🔗 file_path:', navigationArgs?.file_path);
-            console.log('🔗 line_number:', navigationArgs?.line_number);
-
-            if (!navigationArgs || !navigationArgs.file_path || !navigationArgs.line_number) {
-                console.log('❌ Missing required properties in navigation args');
-                vscode.window.showErrorMessage('Navigation arguments missing file_path or line_number');
-                return;
-            }
-
-            navigateToElement(navigationArgs);
+        vscode.commands.registerCommand('pytestembed.navigateToDefinitionSplit', (args: any) => {
+            navigateToElement(args, true);
         })
     );
 
-    // Test command for debugging navigation
+    // Add missing commands that are declared in package.json
     context.subscriptions.push(
-        vscode.commands.registerCommand('pytestembed.testNavigation', () => {
-            console.log('🧪 Testing navigation...');
-            navigateToElement({file_path: 'test.py', line_number: 10});
+        vscode.commands.registerCommand('pytestembed.runTests', () => {
+            runPyTestEmbedCommand('--test');
         })
     );
 
-    // Navigate to element in split view
     context.subscriptions.push(
-        vscode.commands.registerCommand('pytestembed.navigateToElementSplit', (...allArgs: any[]) => {
-            console.log('🔗📱 SPLIT NAVIGATION COMMAND CALLED! 🔗📱');
-            console.log('🔗 RAW COMMAND ARGS - Length:', allArgs.length);
-            console.log('🔗 RAW COMMAND ARGS - Full array:', allArgs);
-
-            // Use the same argument parsing logic as the regular navigation
-            let navigationArgs: any = null;
-
-            if (allArgs.length === 0) {
-                console.log('❌ No arguments passed');
-                vscode.window.showErrorMessage('No navigation arguments provided');
-                return;
-            }
-
-            // Try different approaches to extract the arguments
-            if (allArgs.length === 1) {
-                const firstArg = allArgs[0];
-                if (typeof firstArg === 'string') {
-                    try {
-                        navigationArgs = JSON.parse(firstArg);
-                    } catch (e) {
-                        console.log('❌ Failed to parse string argument as JSON');
-                    }
-                } else if (typeof firstArg === 'object') {
-                    navigationArgs = firstArg;
-                }
-            }
-
-            console.log('🔗 Final navigation args:', navigationArgs);
-
-            if (!navigationArgs || !navigationArgs.file_path || !navigationArgs.line_number) {
-                console.log('❌ Missing required properties in navigation args');
-                vscode.window.showErrorMessage('Navigation arguments missing file_path or line_number');
-                return;
-            }
-
-            navigateToElementSplit(navigationArgs);
+        vscode.commands.registerCommand('pytestembed.generateDocs', () => {
+            runPyTestEmbedCommand('--doc');
         })
     );
 
-    // Smart folding command
     context.subscriptions.push(
-        vscode.commands.registerCommand('pytestembed.foldFunctionWithBlocks', () => {
-            const editor = vscode.window.activeTextEditor;
-            if (editor) {
-                const lineNumber = editor.selection.active.line;
-                foldFunctionWithBlocks(lineNumber);
-            }
+        vscode.commands.registerCommand('pytestembed.runWithoutBlocks', () => {
+            runPyTestEmbedCommand('--run');
         })
     );
 
-    // Toggle double-click navigation command
-    context.subscriptions.push(
-        vscode.commands.registerCommand('pytestembed.toggleDoubleClickNavigation', () => {
-            const config = vscode.workspace.getConfiguration('pytestembed');
-            const currentValue = config.get<boolean>('doubleClickNavigation', true);
-            config.update('doubleClickNavigation', !currentValue, vscode.ConfigurationTarget.Global);
+    // Placeholder commands for package.json compatibility
+    const placeholderCommands = [
+        'pytestembed.toggleTestBlocks',
+        'pytestembed.toggleDocBlocks',
+        'pytestembed.showAllBlocks',
+        'pytestembed.hideAllBlocks',
+        'pytestembed.configureLinter',
+        'pytestembed.openOutputPanel',
+        'pytestembed.generateBlocks',
+        'pytestembed.generateTestsOnly',
+        'pytestembed.generateDocsOnly',
+        'pytestembed.startMcpServer',
+        'pytestembed.stopMcpServer',
+        'pytestembed.openPanel',
+        'pytestembed.runIgnoringTests',
+        'pytestembed.toggleDoubleClickNavigation',
+        'pytestembed.toggleDependencyServer'
+    ];
 
-            const status = !currentValue ? 'enabled' : 'disabled';
-            vscode.window.showInformationMessage(`Double-click navigation ${status}`);
-        })
-    );
+    placeholderCommands.forEach(commandId => {
+        context.subscriptions.push(
+            vscode.commands.registerCommand(commandId, () => {
+                vscode.window.showInformationMessage(`${commandId} - feature coming soon`);
+            })
+        );
+    });
 }
 
 /**
@@ -374,304 +189,31 @@ function runPyTestEmbedCommand(args: string) {
 }
 
 /**
- * Run Python file ignoring test and doc blocks
+ * Navigate to element definition
  */
-function runPythonFileIgnoringTests() {
-    const editor = vscode.window.activeTextEditor;
-    if (!editor || !editor.document.fileName.endsWith('.py')) {
-        vscode.window.showErrorMessage('Please open a Python file');
-        return;
-    }
+async function navigateToElement(args: any, splitView: boolean = false) {
+    try {
+        const { file_path, line_number } = args;
 
-    const filePath = editor.document.fileName;
-    const terminal = vscode.window.createTerminal('PyTestEmbed Run');
-    terminal.sendText(`python "${filePath}"`);
-    terminal.show();
-    
-    import('./state').then(({ addPanelMessage }) => {
-        addPanelMessage(`Running Python file: ${path.basename(filePath)}`, 'info');
-    });
-}
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+        if (!workspaceFolder) {
+            vscode.window.showErrorMessage('No workspace folder found');
+            return;
+        }
 
-/**
- * Run Python without PyTestEmbed blocks
- */
-function runPythonWithoutBlocks() {
-    const editor = vscode.window.activeTextEditor;
-    if (!editor) {
-        vscode.window.showErrorMessage('No active editor');
-        return;
-    }
+        const fullPath = require('path').resolve(workspaceFolder.uri.fsPath, file_path);
+        const fileUri = vscode.Uri.file(fullPath);
 
-    const terminal = vscode.window.createTerminal('PyTestEmbed');
-    terminal.sendText(`pytestembed --run "${editor.document.fileName}"`);
-    terminal.show();
-}
+        const document = await vscode.workspace.openTextDocument(fileUri);
 
-/**
- * Generate smart blocks
- */
-function generateSmartBlocks(type: BlockType) {
-    vscode.window.showInformationMessage(`Generating ${type} blocks...`);
-    // Implementation would call AI generation service
-}
+        const viewColumn = splitView ? vscode.ViewColumn.Beside : vscode.ViewColumn.Active;
+        const editor = await vscode.window.showTextDocument(document, viewColumn);
 
-/**
- * Generate blocks at a specific line
- */
-function generateBlocksAtLine(uri: vscode.Uri, lineNumber: number, type: BlockType) {
-    vscode.window.showTextDocument(uri).then(editor => {
-        // Position cursor at the specified line
-        const position = new vscode.Position(lineNumber - 1, 0);
+        const position = new vscode.Position(line_number - 1, 0);
         editor.selection = new vscode.Selection(position, position);
-        editor.revealRange(new vscode.Range(position, position));
-
-        // Generate blocks
-        generateSmartBlocks(type);
-    });
-}
-
-/**
- * Quick Fix function - analyze and fix function issues
- */
-function quickFixFunction(uri: vscode.Uri, lineNumber: number) {
-    vscode.window.showTextDocument(uri).then(editor => {
-        // Position cursor at the specified line
-        const position = new vscode.Position(lineNumber - 1, 0);
-        editor.selection = new vscode.Selection(position, position);
-        editor.revealRange(new vscode.Range(position, position));
-
-        // For now, show a message - this could be enhanced to analyze the function
-        vscode.window.showInformationMessage(
-            'Quick Fix: Analyzing function for potential improvements...',
-            'Analyze Code', 'Fix Syntax', 'Optimize Performance'
-        ).then(choice => {
-            if (choice === 'Analyze Code') {
-                vscode.window.showInformationMessage('Code analysis feature coming soon!');
-            } else if (choice === 'Fix Syntax') {
-                vscode.window.showInformationMessage('Syntax fixing feature coming soon!');
-            } else if (choice === 'Optimize Performance') {
-                vscode.window.showInformationMessage('Performance optimization feature coming soon!');
-            }
-        });
-    });
-}
-
-/**
- * Toggle blocks of a specific type
- */
-async function toggleBlocksOfType(blockType: 'test' | 'doc', visible: boolean) {
-    await toggleBlockFolding(blockType, !visible); // visible=true means unfold, visible=false means fold
-    vscode.window.showInformationMessage(`${visible ? 'Showing' : 'Hiding'} ${blockType} blocks`);
-}
-
-/**
- * Show all blocks
- */
-async function showAllBlocks() {
-    await toggleBlockFolding('test', false); // false = unfold
-    await toggleBlockFolding('doc', false);  // false = unfold
-    vscode.window.showInformationMessage('Showing all blocks');
-}
-
-/**
- * Hide all blocks
- */
-async function hideAllBlocks() {
-    await toggleBlockFolding('test', true);  // true = fold
-    await toggleBlockFolding('doc', true);   // true = fold
-    vscode.window.showInformationMessage('Hiding all blocks');
-}
-
-/**
- * Collapse blocks of a specific type using VSCode's folding
- */
-// REMOVED - All folding logic moved to folding.ts
-
-/**
- * Expand blocks of a specific type using VSCode's folding
- */
-// REMOVED - All folding logic moved to folding.ts
-
-/**
- * Fold blocks of a specific type
- */
-function foldBlocksOfType(blockType: 'test' | 'doc') {
-    // REMOVED - Will be implemented in separate folding.ts file
-    vscode.window.showInformationMessage(`Folding logic temporarily disabled - being reimplemented`);
-}
-
-/**
- * Configure PyTestEmbed linter
- */
-function configurePyTestEmbedLinter() {
-    vscode.window.showInformationMessage('Linter configuration feature coming soon!');
-}
-
-/**
- * Navigate to a definition based on dependency information
- */
-async function navigateToDefinition(args: string) {
-    try {
-        const { file, name } = JSON.parse(args);
-
-        // Find the workspace folder
-        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-        if (!workspaceFolder) {
-            vscode.window.showErrorMessage('No workspace folder found');
-            return;
-        }
-
-        // Construct the full file path
-        const fullPath = path.join(workspaceFolder.uri.fsPath, file);
-        const fileUri = vscode.Uri.file(fullPath);
-
-        try {
-            // Open the file and navigate to the definition
-            const document = await vscode.workspace.openTextDocument(fileUri);
-            const editor = await vscode.window.showTextDocument(document);
-
-            // Search for the definition in the file
-            const text = document.getText();
-            const lines = text.split('\n');
-
-            for (let i = 0; i < lines.length; i++) {
-                const line = lines[i];
-                const trimmed = line.trim();
-
-                // Look for function or class definitions
-                if ((trimmed.startsWith(`def ${name}(`) ||
-                     trimmed.startsWith(`class ${name}(`)) &&
-                    trimmed.endsWith(':')) {
-
-                    const position = new vscode.Position(i, line.indexOf(name));
-                    editor.selection = new vscode.Selection(position, position);
-                    editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
-                    return;
-                }
-            }
-
-            // If not found, just show the file
-            vscode.window.showInformationMessage(`Definition of '${name}' not found in ${file}`);
-        } catch (error) {
-            vscode.window.showErrorMessage(`Could not open file: ${file}`);
-        }
-    } catch (error) {
-        vscode.window.showErrorMessage('Invalid navigation arguments');
-    }
-}
-
-/**
- * Navigate to a specific element (for hover provider)
- */
-async function navigateToElement(args: any) {
-    try {
-        console.log('🔗 navigateToElement called with args:', args, 'type:', typeof args);
-
-        // Handle different argument formats
-        let file_path: string, line_number: number;
-
-        if (Array.isArray(args) && args.length > 0) {
-            // Array format: [{file_path: "...", line_number: 123}]
-            ({ file_path, line_number } = args[0]);
-        } else if (args && typeof args === 'object' && args.file_path) {
-            // Object format: {file_path: "...", line_number: 123}
-            ({ file_path, line_number } = args);
-        } else {
-            console.log('❌ Invalid arguments format');
-            vscode.window.showErrorMessage('Invalid navigation arguments format');
-            return;
-        }
-
-        console.log(`🔗 Parsed: file_path=${file_path}, line_number=${line_number}`);
-
-        // Find the workspace folder
-        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-        if (!workspaceFolder) {
-            vscode.window.showErrorMessage('No workspace folder found');
-            return;
-        }
-
-        // Construct the full file path
-        const fullPath = path.join(workspaceFolder.uri.fsPath, file_path);
-        const fileUri = vscode.Uri.file(fullPath);
-
-        try {
-            // Open the file and navigate to the line
-            const document = await vscode.workspace.openTextDocument(fileUri);
-            const editor = await vscode.window.showTextDocument(document);
-
-            // Navigate to the specific line
-            const position = new vscode.Position(line_number - 1, 0); // Convert to 0-based
-            editor.selection = new vscode.Selection(position, position);
-            editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
-
-        } catch (error) {
-            vscode.window.showErrorMessage(`Could not open file: ${file_path}`);
-        }
+        editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
 
     } catch (error) {
-        vscode.window.showErrorMessage('Invalid navigation arguments');
+        vscode.window.showErrorMessage(`Failed to navigate: ${error}`);
     }
-}
-
-/**
- * Navigate to a specific element in split view (for hover provider)
- */
-async function navigateToElementSplit(args: any) {
-    try {
-        console.log('🔗📱 navigateToElementSplit called with args:', args, 'type:', typeof args);
-
-        // Handle different argument formats
-        let file_path: string, line_number: number;
-
-        if (Array.isArray(args) && args.length > 0) {
-            // Array format: [{file_path: "...", line_number: 123}]
-            ({ file_path, line_number } = args[0]);
-        } else if (args && typeof args === 'object' && args.file_path) {
-            // Object format: {file_path: "...", line_number: 123}
-            ({ file_path, line_number } = args);
-        } else {
-            console.log('❌ Invalid arguments format');
-            vscode.window.showErrorMessage('Invalid navigation arguments format');
-            return;
-        }
-
-        console.log('🔗📱 Navigating to split view:', file_path, 'line:', line_number);
-
-        // Find the workspace folder
-        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-        if (!workspaceFolder) {
-            vscode.window.showErrorMessage('No workspace folder found');
-            return;
-        }
-
-        // Construct the full file path
-        const fullPath = path.join(workspaceFolder.uri.fsPath, file_path);
-        const fileUri = vscode.Uri.file(fullPath);
-
-        try {
-            // Open the file in split view and navigate to the line
-            const document = await vscode.workspace.openTextDocument(fileUri);
-            const editor = await vscode.window.showTextDocument(document, vscode.ViewColumn.Beside);
-
-            // Navigate to the specific line
-            const position = new vscode.Position(line_number - 1, 0); // Convert to 0-based
-            editor.selection = new vscode.Selection(position, position);
-            editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
-
-        } catch (error) {
-            vscode.window.showErrorMessage(`Could not open file in split view: ${file_path}`);
-        }
-
-    } catch (error) {
-        vscode.window.showErrorMessage('Invalid navigation arguments for split view');
-    }
-}
-
-/**
- * Update status bar
- */
-function updateStatusBar() {
-    // Implementation for updating status bar based on current state
 }

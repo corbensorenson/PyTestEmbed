@@ -1,6 +1,8 @@
+# Development files
 .vscode/**
 .vscode-test/**
 src/**
+node_modules/**
 .gitignore
 .yarnrc
 vsc-extension-quickstart.md
@@ -8,3 +10,20 @@ vsc-extension-quickstart.md
 **/.eslintrc.json
 **/*.map
 **/*.ts
+
+# Build artifacts
+package-lock.json
+
+# Temp files
+*.vsix
+
+# Linting configs (not needed in extension)
+linting-configs/**
+
+# Old compiled files that shouldn't be there
+out/codeLens.*
+out/dependencyServer.*
+out/liveTesting.*
+out/mcpServer.*
+out/panel.*
+out/testResults.*

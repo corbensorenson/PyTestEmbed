@@ -1,100 +1,99 @@
 /**
- * Status bar management for PyTestEmbed extension
+ * Status bar indicators for PyTestEmbed services
  */
 
 import * as vscode from 'vscode';
 import { state } from './state';
 
+let liveTestStatusItem: vscode.StatusBarItem;
+let dependencyStatusItem: vscode.StatusBarItem;
+let mcpStatusItem: vscode.StatusBarItem;
+
 /**
- * Create server status indicators in the status bar
+ * Create status bar indicators for all services
  */
-export function createServerStatusIndicators(context: vscode.ExtensionContext) {
-    // Live Test Server status
-    state.liveTestServerStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 200);
-    state.liveTestServerStatusBar.text = '$(debug-disconnect) Live Test: Disconnected';
-    state.liveTestServerStatusBar.tooltip = 'PyTestEmbed Live Test Server Status';
-    state.liveTestServerStatusBar.command = 'pytestembed.toggleLiveTesting';
-    context.subscriptions.push(state.liveTestServerStatusBar);
+export function createStatusBarIndicators(context: vscode.ExtensionContext) {
+    // Live Test Service Status
+    liveTestStatusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+    liveTestStatusItem.command = 'pytestembed.toggleLiveTesting';
+    liveTestStatusItem.tooltip = 'Click to toggle Live Testing';
+    updateLiveTestStatus(false);
+    liveTestStatusItem.show();
+    context.subscriptions.push(liveTestStatusItem);
 
-    // MCP Server status
-    state.mcpServerStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 199);
-    state.mcpServerStatusBar.text = '$(debug-disconnect) MCP: Disconnected';
-    state.mcpServerStatusBar.tooltip = 'PyTestEmbed MCP Server Status (for Agentic Coding)';
-    state.mcpServerStatusBar.command = 'pytestembed.toggleMcpServer';
-    context.subscriptions.push(state.mcpServerStatusBar);
+    // Dependency Graph Service Status  
+    dependencyStatusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
+    dependencyStatusItem.command = 'pytestembed.toggleDependencyService';
+    dependencyStatusItem.tooltip = 'Click to toggle Dependency Graph Service';
+    updateDependencyStatus(false);
+    dependencyStatusItem.show();
+    context.subscriptions.push(dependencyStatusItem);
 
-    // Show status bars
-    state.liveTestServerStatusBar.show();
-    state.mcpServerStatusBar.show();
-
-    // Start periodic status checks
-    startServerStatusChecks();
+    // MCP Service Status
+    mcpStatusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 98);
+    mcpStatusItem.command = 'pytestembed.toggleMcpService';
+    mcpStatusItem.tooltip = 'Click to toggle MCP Service';
+    updateMcpStatus(false);
+    mcpStatusItem.show();
+    context.subscriptions.push(mcpStatusItem);
 }
 
 /**
- * Start periodic checks for server status
+ * Update live test service status
  */
-function startServerStatusChecks() {
-    // Check immediately
-    checkServerStatus();
-
-    // Check every 10 seconds
-    state.serverStatusCheckInterval = setInterval(checkServerStatus, 10000);
-}
-
-/**
- * Check the status of both servers
- */
-async function checkServerStatus() {
-    // Check Live Test Server
-    try {
-        const response = await fetch('http://localhost:8765', {
-            method: 'GET',
-            signal: AbortSignal.timeout(2000)
-        });
-        updateLiveTestServerStatus(true);
-    } catch (error) {
-        updateLiveTestServerStatus(false);
-    }
-
-    // Check MCP Server
-    try {
-        const response = await fetch('http://localhost:3001', {
-            method: 'GET',
-            signal: AbortSignal.timeout(2000)
-        });
-        updateMcpServerStatus(true);
-    } catch (error) {
-        updateMcpServerStatus(false);
+export function updateLiveTestStatus(running: boolean) {
+    if (liveTestStatusItem) {
+        if (running) {
+            liveTestStatusItem.text = '$(check-all) Live Test';
+            liveTestStatusItem.backgroundColor = undefined;
+            liveTestStatusItem.color = '#4CAF50'; // Green
+        } else {
+            liveTestStatusItem.text = '$(circle-slash) Live Test';
+            liveTestStatusItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+            liveTestStatusItem.color = undefined;
+        }
     }
 }
 
 /**
- * Update Live Test Server status indicator
+ * Update dependency service status
  */
-function updateLiveTestServerStatus(connected: boolean) {
-    if (connected) {
-        state.liveTestServerStatusBar.text = '$(debug-alt) Live Test: Connected';
-        state.liveTestServerStatusBar.backgroundColor = undefined;
-        state.liveTestServerStatusBar.tooltip = 'PyTestEmbed Live Test Server: Connected (Click to stop)';
-    } else {
-        state.liveTestServerStatusBar.text = '$(debug-disconnect) Live Test: Disconnected';
-        state.liveTestServerStatusBar.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
-        state.liveTestServerStatusBar.tooltip = 'PyTestEmbed Live Test Server: Disconnected (Click to start)';
+export function updateDependencyStatus(running: boolean) {
+    if (dependencyStatusItem) {
+        if (running) {
+            dependencyStatusItem.text = '$(references) Dependencies';
+            dependencyStatusItem.backgroundColor = undefined;
+            dependencyStatusItem.color = '#2196F3'; // Blue
+        } else {
+            dependencyStatusItem.text = '$(circle-slash) Dependencies';
+            dependencyStatusItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+            dependencyStatusItem.color = undefined;
+        }
     }
 }
 
 /**
- * Update MCP Server status indicator
+ * Update MCP service status
  */
-function updateMcpServerStatus(connected: boolean) {
-    if (connected) {
-        state.mcpServerStatusBar.text = '$(debug-alt) MCP: Connected';
-        state.mcpServerStatusBar.backgroundColor = undefined;
-        state.mcpServerStatusBar.tooltip = 'PyTestEmbed MCP Server: Connected - AI agents can use PyTestEmbed (Click to stop)';
-    } else {
-        state.mcpServerStatusBar.text = '$(debug-disconnect) MCP: Disconnected';
-        state.mcpServerStatusBar.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
-        state.mcpServerStatusBar.tooltip = 'PyTestEmbed MCP Server: Disconnected - AI agents cannot use PyTestEmbed (Click to start)';
+export function updateMcpStatus(running: boolean) {
+    if (mcpStatusItem) {
+        if (running) {
+            mcpStatusItem.text = '$(robot) MCP';
+            mcpStatusItem.backgroundColor = undefined;
+            mcpStatusItem.color = '#FF9800'; // Orange
+        } else {
+            mcpStatusItem.text = '$(circle-slash) MCP';
+            mcpStatusItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+            mcpStatusItem.color = undefined;
+        }
     }
+}
+
+/**
+ * Dispose status bar items
+ */
+export function disposeStatusBar() {
+    liveTestStatusItem?.dispose();
+    dependencyStatusItem?.dispose();
+    mcpStatusItem?.dispose();
 }

@@ -156,38 +156,36 @@ export function updateCollapsedBlockStatusIndicators(editor: vscode.TextEditor, 
  * Check if a test block is collapsed
  */
 function isTestBlockCollapsed(editor: vscode.TextEditor, testBlockLine: number): boolean {
-    // For now, we'll assume blocks are not collapsed by default
-    // In a real implementation, we'd check VSCode's folding state
-    // This is a simplified approach - we could enhance this by checking
-    // if the lines after the test: block are visible
-
     const document = editor.document;
-    const testLine = document.lineAt(testBlockLine);
-    const baseIndent = testLine.firstNonWhitespaceCharacterIndex;
 
-    // Check if there are any visible lines after the test: block
-    // If the next indented line is not visible, the block is likely collapsed
+    // Check if the test: block content is visible
+    // If the lines immediately after test: are not in the visible ranges, it's likely folded
+
+    // Find the first non-empty line after test:
+    let nextContentLine = -1;
     for (let i = testBlockLine + 1; i < document.lineCount; i++) {
         const line = document.lineAt(i);
-        const trimmedText = line.text.trim();
-
-        if (trimmedText === '') {
-            continue; // Skip empty lines
-        }
-
-        const currentIndent = line.firstNonWhitespaceCharacterIndex;
-
-        // If we hit something at same or lower indentation, we've reached the end
-        if (currentIndent <= baseIndent) {
+        if (line.text.trim() !== '') {
+            nextContentLine = i;
             break;
         }
-
-        // For now, assume blocks are never collapsed to avoid showing icons on uncollapsed blocks
-        // This can be enhanced later with proper folding state detection
-        return false;
     }
 
-    return false;
+    if (nextContentLine === -1) {
+        return false; // No content to fold
+    }
+
+    // Check if this content line is visible in any visible range
+    const isContentVisible = editor.visibleRanges.some(range =>
+        nextContentLine >= range.start.line && nextContentLine <= range.end.line
+    );
+
+    // If content is not visible but the test: line is visible, it's likely folded
+    const isTestLineVisible = editor.visibleRanges.some(range =>
+        testBlockLine >= range.start.line && testBlockLine <= range.end.line
+    );
+
+    return isTestLineVisible && !isContentVisible;
 }
 
 /**

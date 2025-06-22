@@ -1,28 +1,8 @@
 import * as vscode from 'vscode';
+import { requestDependencyInfo, getCachedDependencyInfo } from './liveClient';
+import { state } from './state';
+import { DependencyInfo } from './types';
 import * as WebSocket from 'ws';
-
-interface EnhancedDependency {
-    id: string;
-    name: string;
-    file_path: string;
-    line_number: number;
-    documentation: string;
-    element_type: string;
-}
-
-interface DependencyInfo {
-    type: string;
-    element_id: string;
-    element_name: string;
-    file_path: string;
-    line_number: number;
-    dependencies: string[];
-    dependents: string[];
-    enhanced_dependencies: EnhancedDependency[];
-    enhanced_dependents: EnhancedDependency[];
-    dependency_count: number;
-    dependent_count: number;
-}
 
 export class PyTestEmbedHoverProvider implements vscode.HoverProvider {
     
@@ -115,7 +95,16 @@ export class PyTestEmbedHoverProvider implements vscode.HoverProvider {
         try {
             if (isDefinition) {
                 // For function/class definitions, show dependencies
-                const dependencyInfo = await this.getDependencyInfo(relativePath, word, lineNumber);
+                const elementId = `${relativePath}:${word}:${lineNumber}`;
+                let dependencyInfo = getCachedDependencyInfo(elementId);
+
+                if (!dependencyInfo && state.liveTestingEnabled) {
+                    // Request dependency info from live client
+                    requestDependencyInfo(relativePath, word, lineNumber);
+                    // Return a loading hover for now
+                    return new vscode.Hover(new vscode.MarkdownString(`🔍 Loading dependencies for **${word}**...`));
+                }
+
                 if (dependencyInfo) {
                     return await this.createDependencyHover(dependencyInfo);
                 }
@@ -511,7 +500,7 @@ export class PyTestEmbedHoverProvider implements vscode.HoverProvider {
         markdown.appendMarkdown(`**🔗 ${info.element_name}**\n\n`);
         
         // Dependencies section
-        if (info.enhanced_dependencies.length > 0) {
+        if (info.enhanced_dependencies && info.enhanced_dependencies.length > 0) {
             markdown.appendMarkdown(`**📥 Dependencies (${info.dependency_count}):**\n\n`);
 
             for (const dep of info.enhanced_dependencies) {
@@ -548,7 +537,7 @@ export class PyTestEmbedHoverProvider implements vscode.HoverProvider {
         }
         
         // Dependents section
-        if (info.enhanced_dependents.length > 0) {
+        if (info.enhanced_dependents && info.enhanced_dependents.length > 0) {
             markdown.appendMarkdown(`**📤 Used by (${info.dependent_count}):**\n\n`);
 
             for (const dep of info.enhanced_dependents) {
@@ -585,7 +574,8 @@ export class PyTestEmbedHoverProvider implements vscode.HoverProvider {
         }
 
         // If no dependencies or dependents
-        if (info.enhanced_dependencies.length === 0 && info.enhanced_dependents.length === 0) {
+        if ((!info.enhanced_dependencies || info.enhanced_dependencies.length === 0) &&
+            (!info.enhanced_dependents || info.enhanced_dependents.length === 0)) {
             markdown.appendMarkdown(`*No dependencies or dependents found.*`);
         }
 

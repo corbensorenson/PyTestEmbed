@@ -25,7 +25,11 @@ export interface ExtensionState {
     liveTestingEnabled: boolean;
     liveTestSocket: WebSocket | null;
     liveTestProcess: cp.ChildProcess | null;
-    
+
+    // Dependency server state
+    dependencyServerEnabled: boolean;
+    dependencyServerProcess: cp.ChildProcess | null;
+
     // MCP server state
     mcpServerEnabled: boolean;
     mcpServerProcess: cp.ChildProcess | null;
@@ -34,7 +38,7 @@ export interface ExtensionState {
     testResults: Map<string, TestResult[]>; // file path -> test results
     currentTestProgress: { current: number; total: number };
 
-    // Dependency information cache
+    // Dependency cache for fast hover display (updated by Python server)
     dependencyCache: Map<string, DependencyInfo>; // element_id -> dependency info
     
     // UI components
@@ -42,6 +46,7 @@ export interface ExtensionState {
     diagnosticCollection: vscode.DiagnosticCollection;
     testProgressStatusBar: vscode.StatusBarItem;
     liveTestServerStatusBar: vscode.StatusBarItem;
+    dependencyServerStatusBar: vscode.StatusBarItem;
     mcpServerStatusBar: vscode.StatusBarItem;
     serverStatusCheckInterval: NodeJS.Timeout | undefined;
     documentChangeTimeout: NodeJS.Timeout | undefined;
@@ -106,6 +111,7 @@ export interface EnhancedDependencyElement {
 
 // Dependency information
 export interface DependencyInfo {
+    type: string;
     element_id: string;
     element_name: string;
     file_path: string;

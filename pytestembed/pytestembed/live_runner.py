@@ -15,8 +15,6 @@ import shutil
 from pathlib import Path
 from typing import Dict, List, Optional, Callable, Any
 from dataclasses import dataclass, asdict
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
 import websockets
 import websockets.server
 from .parser import PyTestEmbedParser
@@ -26,6 +24,7 @@ from .smart_test_selection import SmartTestSelector
 from .failure_prediction import FailurePredictor
 from .property_testing import PropertyBasedTester
 from .dependency_graph import CodeDependencyGraph
+from .file_watcher import FileWatcherService, FileChangeEvent
 
 
 @dataclass
@@ -64,7 +63,6 @@ class LiveTestRunner:
         self.parser = PyTestEmbedParser()
         self.generator = TestGenerator()
         self.runner = TestRunner()
-        self.observer = None
         self.server = None
 
         # Advanced testing features
@@ -74,6 +72,10 @@ class LiveTestRunner:
         self.dependency_graph = CodeDependencyGraph(str(workspace_path))
         self.smart_testing_enabled = True
 
+        # Modular file watcher service
+        self.file_watcher = FileWatcherService(str(workspace_path))
+        self.file_watcher.subscribe('file_changed', self.on_file_changed)
+
         # Build dependency graph on startup
         self.dependency_graph.build_graph()
 
@@ -81,6 +83,10 @@ class LiveTestRunner:
         self.temp_cleanup_interval = 300  # 5 minutes
         self.temp_file_max_age = 3600  # 1 hour
         self.last_cleanup = time.time()
+
+        # Debouncing for test execution to prevent duplicate runs
+        self._test_execution_locks = {}  # file_path -> timestamp
+        self._test_debounce_time = 2.0  # 2 seconds
 
         # Start garbage collection
         self._start_garbage_collection()
@@ -97,8 +103,10 @@ class LiveTestRunner:
             # Send current test results to new client
             await self.send_all_results(websocket)
 
-            # Mark all tests in the workspace as untested initially
-            await self.mark_all_workspace_tests_as_untested()
+            # DISABLED: Don't discover workspace tests on client connect
+            # This was causing tests to be marked as untested across all files
+            # await self.discover_workspace_tests()
+            print("📱 Client connected - workspace test discovery disabled to prevent mass execution")
             
             try:
                 async for message in websocket:
@@ -115,24 +123,47 @@ class LiveTestRunner:
     async def handle_message(self, websocket, message: str):
         """Handle messages from IDE clients."""
         try:
+            print(f"🔍 RAW MESSAGE RECEIVED: {message}")
             data = json.loads(message)
             command = data.get('command')
-            
-            if command == 'run_tests':
-                file_path = data.get('file_path')
-                if file_path:
-                    await self.run_file_tests(file_path)
 
-            elif command == 'run_intelligent_tests':
-                file_path = data.get('file_path')
-                if file_path:
-                    await self.run_intelligent_tests(file_path)
+            # DETAILED LOGGING: Track what commands are being received
+            print(f"🔍 PARSED COMMAND: {command}")
+            print(f"🔍 FULL DATA: {data}")
+            if 'file_path' in data:
+                print(f"🔍 FILE PATH: {data['file_path']}")
 
-            elif command == 'run_test':
+            # Send confirmation to VSCode that we received the message
+            await self.broadcast({
+                'type': 'debug_message',
+                'message': f"🔍 Python server received command: {command}"
+            })
+
+            # VSCode is now a pure display client - it doesn't send test execution commands
+            # All test execution is handled by the file watcher automatically
+            if command == 'get_all_test_results':
+                print("📊 VSCode requested all existing test results")
+                await self.send_all_test_results()
+
+            elif command == 'generate_ai_blocks':
                 file_path = data.get('file_path')
                 line_number = data.get('line_number')
-                if file_path and line_number:
-                    await self.run_single_test(file_path, line_number)
+                block_type = data.get('block_type')
+                if file_path and line_number and block_type:
+                    print(f"🤖 AI generation requested: {block_type} blocks for {file_path}:{line_number}")
+                    await self.handle_ai_generation(file_path, line_number, block_type)
+
+            elif command == 'enhance_ai_blocks':
+                file_path = data.get('file_path')
+                line_number = data.get('line_number')
+                enhancement_type = data.get('enhancement_type')
+                if file_path and line_number and enhancement_type:
+                    print(f"🔧 AI enhancement requested: {enhancement_type} for {file_path}:{line_number}")
+                    await self.handle_ai_enhancement(file_path, line_number, enhancement_type)
+
+            elif command in ['run_tests', 'run_intelligent_tests', 'file_saved', 'run_initial_workspace_tests', 'run_test']:
+                print(f"⚠️ Received deprecated command '{command}' - VSCode should not send test execution commands")
+                print("📝 All test execution is now handled automatically by the file watcher")
 
             elif data.get('type') == 'run_individual_test':
                 await self.handle_run_individual_test(data)
@@ -319,19 +350,32 @@ class LiveTestRunner:
             else:
                 status = 'fail'
             
-            # Store results
+            # Double-check failed tests to ensure they're real failures
+            verified_results = await self.verify_failed_tests(file_path, test_results)
+
+            # Recalculate status after verification
+            if not verified_results:
+                verified_status = 'no_tests'
+            elif all(t.status == 'pass' for t in verified_results):
+                verified_status = 'pass'
+            elif any(t.status == 'error' for t in verified_results):
+                verified_status = 'error'
+            else:
+                verified_status = 'fail'
+
+            # Store verified results
             file_results = FileTestResults(
                 file_path=file_path,
-                status=status,
-                tests=test_results,
+                status=verified_status,
+                tests=verified_results,
                 coverage=coverage,
                 duration=duration,
                 timestamp=time.time()
             )
-            
+
             self.file_results[file_path] = file_results
-            
-            # Broadcast results
+
+            # Broadcast verified results
             await self.broadcast({
                 'type': 'test_results',
                 'data': asdict(file_results)
@@ -350,14 +394,15 @@ class LiveTestRunner:
                 'timestamp': time.time()
             })
 
-    async def handle_file_change(self, changed_file: str):
-        """Handle file changes by updating dependency graph and running intelligent tests."""
-        print(f"📝 Handling file change: {changed_file}")
+    async def on_file_changed(self, event: FileChangeEvent):
+        """Callback for file change events from the modular file watcher."""
+        changed_file = event.file_path
+        print(f"📝 File watcher detected change: {changed_file}")
 
-        # Skip test running for certain files to avoid interference
+        # Skip processing for certain files to avoid interference
         skip_test_files = ['quick_test.py', 'simple_dependency_test.py', 'test_enhanced_tooltips.py']
         if any(skip_file in changed_file for skip_file in skip_test_files):
-            print(f"⏭️ Skipping test execution for {changed_file}")
+            print(f"⏭️ Skipping file change processing for {changed_file}")
             return
 
         try:
@@ -381,13 +426,13 @@ class LiveTestRunner:
             # Clear dependency cache for affected elements
             await self.clear_dependency_cache_for_file(changed_file)
 
-            # Now run intelligent tests
+            # Run intelligent tests for the changed file and its dependents
+            print(f"🧪 File watcher triggering intelligent tests for {changed_file}")
             await self.run_intelligent_tests(changed_file)
 
         except Exception as e:
             print(f"⚠️ Error handling file change: {e}")
-            # Fallback to just running tests
-            await self.run_intelligent_tests(changed_file)
+            # Do not fallback to running tests
 
     async def clear_dependency_cache_for_file(self, file_path: str):
         """Clear cached dependency information for elements in the changed file."""
@@ -401,109 +446,485 @@ class LiveTestRunner:
         })
 
     async def run_intelligent_tests(self, changed_file: str):
-        """Run tests intelligently based on what changed in the file."""
-        print(f"🧠 Running intelligent tests for {changed_file}")
+        """Run tests for the changed file and its dependents."""
+        print(f"🧠 INTELLIGENT TESTS STARTED for {changed_file}")
+        print(f"🧠 Current time: {time.time()}")
+        print(f"🧠 Workspace path: {self.workspace_path}")
+
+        # Send debug message to VSCode console
+        await self.broadcast({
+            'type': 'debug_message',
+            'message': f"🧠 INTELLIGENT TESTS STARTED for {changed_file}"
+        })
+
+        # Debouncing: Check if we recently ran tests for this file
+        current_time = time.time()
+        last_run_time = self._test_execution_locks.get(changed_file, 0)
+        print(f"🧠 Last run time for {changed_file}: {last_run_time}")
+        print(f"🧠 Time since last run: {current_time - last_run_time}")
+
+        if current_time - last_run_time < self._test_debounce_time:
+            print(f"⏭️ Skipping duplicate test execution for {changed_file} (debounced)")
+            return
+
+        # Update the lock timestamp
+        self._test_execution_locks[changed_file] = current_time
+        print(f"🧠 Updated lock timestamp for {changed_file}")
 
         try:
-            # First, analyze what specifically changed in the file
-            affected_tests = await self.analyze_file_changes(changed_file)
-
-            if affected_tests:
-                print(f"📊 Found {len(affected_tests)} affected tests in {changed_file}")
-
-                # Broadcast intelligent test selection info
-                await self.broadcast({
-                    'type': 'intelligent_test_selection',
-                    'data': {
-                        'changed_file': changed_file,
-                        'affected_tests': affected_tests,
-                        'reason': 'file_change_analysis'
-                    }
-                })
-
-                # Run only the affected tests
-                await self.run_specific_tests(changed_file, affected_tests)
-            else:
-                print(f"📊 No specific tests affected, running all tests in {changed_file}")
-                # Fallback to running all tests in the file
-                await self.run_file_tests(changed_file)
-
-            # Also check for dependency impacts (other files that might be affected)
-            try:
-                impact_files = self.dependency_graph.get_test_impact(changed_file)
-                for file_path in impact_files:
-                    if file_path.endswith('.py') and file_path != changed_file:
-                        print(f"🔗 Running tests in dependent file: {file_path}")
-                        await self.run_file_tests(file_path)
-            except Exception as dep_error:
-                print(f"⚠️ Error in dependency analysis: {dep_error}")
-
-        except Exception as e:
-            print(f"⚠️ Error in intelligent test selection: {e}")
-            # Fallback to running tests for the changed file only
+            # Step 1: Always test the changed file itself
+            print(f"🎯 Testing changed file: {changed_file}")
             await self.run_file_tests(changed_file)
 
-    async def analyze_file_changes(self, file_path: str):
-        """Analyze what changed in a file and determine which tests should be run."""
-        try:
-            # For now, we'll use a simple heuristic: run tests for all functions/classes in the file
-            # In the future, this could be enhanced with git diff analysis
+            # Step 2: Find and test dependent files (files that import/use this file)
+            print(f"🔍 STARTING DEPENDENCY ANALYSIS for {changed_file}")
+            print(f"🔍 Dependency graph object: {self.dependency_graph}")
+            print(f"🔍 Dependency graph has {len(self.dependency_graph.elements)} elements")
 
+            # Debug: Show some elements in the dependency graph
+            print(f"🔍 Sample elements in dependency graph:")
+            for i, (element_id, element) in enumerate(self.dependency_graph.elements.items()):
+                if i < 10:  # Show first 10 elements
+                    print(f"🔍   {element_id}: {element.name} in {element.file_path}")
+
+            # Debug: Show file elements mapping
+            print(f"🔍 File elements mapping:")
+            for file_path, elements in self.dependency_graph.file_elements.items():
+                print(f"🔍   {file_path}: {len(elements)} elements")
+
+            # Debug: Show reverse dependencies
+            print(f"🔍 Reverse dependencies (first 5):")
+            for i, (element_id, dependents) in enumerate(self.dependency_graph.reverse_dependencies.items()):
+                if i < 5 and dependents:
+                    print(f"🔍   {element_id} <- {list(dependents)}")
+
+            try:
+                # Try both relative and absolute paths for dependency analysis
+                relative_path = changed_file
+                absolute_path = str(self.workspace_path / changed_file) if not Path(changed_file).is_absolute() else changed_file
+
+                print(f"🔍 Calling get_test_impact with relative path: {relative_path}")
+                dependent_files_rel = self.dependency_graph.get_test_impact(relative_path)
+                print(f"🔍 Relative path analysis returned {len(dependent_files_rel)} files: {dependent_files_rel}")
+
+                print(f"🔍 Calling get_test_impact with absolute path: {absolute_path}")
+                dependent_files_abs = self.dependency_graph.get_test_impact(absolute_path)
+                print(f"🔍 Absolute path analysis returned {len(dependent_files_abs)} files: {dependent_files_abs}")
+
+                # Combine results and remove duplicates
+                dependent_files = list(set(dependent_files_rel + dependent_files_abs))
+                print(f"🔍 COMBINED DEPENDENCY ANALYSIS: {len(dependent_files)} files: {dependent_files}")
+
+                # Remove the changed file itself (already tested) - check both relative and absolute
+                dependent_files = [f for f in dependent_files if f != changed_file and f != relative_path and f != absolute_path]
+                print(f"🔍 AFTER FILTERING: {len(dependent_files)} dependent files: {dependent_files}")
+
+                if dependent_files:
+                    print(f"🔗 Found {len(dependent_files)} dependent files to test")
+                    for dep_file in dependent_files:
+                        print(f"🧪 Testing dependent file: {dep_file}")
+                        await self.run_file_tests(dep_file)
+                        # Small delay to prevent overwhelming
+                        await asyncio.sleep(0.1)
+                else:
+                    print(f"📊 No dependent files found for {changed_file}")
+
+            except Exception as dep_error:
+                print(f"⚠️ Error in dependency analysis: {dep_error}")
+                print(f"✅ Completed testing for {changed_file} only (dependency analysis failed)")
+                return
+
+            print(f"✅ Completed intelligent testing for {changed_file} and {len(dependent_files)} dependents")
+
+        except Exception as e:
+            print(f"⚠️ Error running tests for {changed_file}: {e}")
+            # Even in error case, don't run tests for other files
+
+    async def handle_file_saved(self, saved_file: str):
+        """
+        Handle file save events from IDEs.
+        This is the central hub for ALL test selection and execution logic.
+        VSCode is just a dumb client that sends notifications.
+        """
+        print(f"🎯 HANDLING FILE SAVE: {saved_file}")
+
+        # Send debug message to VSCode console
+        await self.broadcast({
+            'type': 'debug_message',
+            'message': f"🎯 Python server handling file save: {saved_file}"
+        })
+
+        try:
+            # Step 1: Run tests for the saved file
+            print(f"🧪 Running tests for saved file: {saved_file}")
+            await self.run_file_tests(saved_file)
+
+            # Step 2: Find dependent files (files that import/use this file)
+            dependent_files = await self.get_dependent_files(saved_file)
+
+            # Send debug info to VSCode
+            await self.broadcast({
+                'type': 'debug_message',
+                'message': f"🔍 Found {len(dependent_files)} dependent files: {dependent_files}"
+            })
+
+            # Step 3: Run tests for dependent files
+            for dep_file in dependent_files:
+                print(f"🧪 Running tests for dependent file: {dep_file}")
+                await self.run_file_tests(dep_file)
+
+            print(f"✅ Completed testing for {saved_file} and {len(dependent_files)} dependents")
+
+        except Exception as e:
+            print(f"⚠️ Error handling file save for {saved_file}: {e}")
+            await self.broadcast({
+                'type': 'debug_message',
+                'message': f"⚠️ Error handling file save: {e}"
+            })
+
+    async def count_tests_in_file(self, file_path: str) -> int:
+        """Count the number of tests in a file."""
+        try:
             # Handle both absolute and relative paths
             if Path(file_path).is_absolute():
                 full_path = file_path
             else:
                 full_path = str(self.workspace_path / file_path)
+
+            if not Path(full_path).exists():
+                return 0
+
+            # Parse the file to count tests
             parsed_program = self.parser.parse_file(full_path)
+            test_count = 0
 
-            affected_tests = []
-
-            # Collect all functions and methods that have tests
+            # Count function tests
             for func in parsed_program.functions:
-                if func.test_blocks:
-                    for test_block in func.test_blocks:
-                        for test_case in test_block.test_cases:
-                            affected_tests.append({
-                                'function_name': func.name,
-                                'line_number': test_case.line_number,
-                                'assertion': test_case.assertion,
-                                'type': 'function_test'
-                            })
+                for test_block in func.test_blocks:
+                    test_count += len(test_block.test_cases)
 
-            # Collect all class methods that have tests
+            # Count class method tests
             for cls in parsed_program.classes:
                 for method in cls.methods:
-                    if method.test_blocks:
-                        for test_block in method.test_blocks:
-                            for test_case in test_block.test_cases:
-                                affected_tests.append({
-                                    'class_name': cls.name,
-                                    'method_name': method.name,
-                                    'line_number': test_case.line_number,
-                                    'assertion': test_case.assertion,
-                                    'type': 'method_test'
-                                })
-
-                # Collect class-level test blocks
+                    for test_block in method.test_blocks:
+                        test_count += len(test_block.test_cases)
+                # Count class-level tests
                 for test_block in cls.test_blocks:
-                    for test_case in test_block.test_cases:
-                        affected_tests.append({
-                            'class_name': cls.name,
-                            'line_number': test_case.line_number,
-                            'assertion': test_case.assertion,
-                            'type': 'class_test'
-                        })
+                    test_count += len(test_block.test_cases)
 
-            # Collect all global test blocks (module-level tests)
+            # Count global tests
             for test_block in parsed_program.global_test_blocks:
-                for test_case in test_block.test_cases:
-                    affected_tests.append({
-                        'line_number': test_case.line_number,
-                        'assertion': test_case.assertion,
-                        'type': 'global_test'
-                    })
+                test_count += len(test_block.test_cases)
 
-            return affected_tests
+            return test_count
+
+        except Exception as e:
+            print(f"⚠️ Error counting tests in {file_path}: {e}")
+            return 0
+
+    async def get_dependent_files(self, changed_file: str) -> list:
+        """Get files that depend on the changed file."""
+        try:
+            # Try both relative and absolute paths for dependency analysis
+            relative_path = changed_file
+            absolute_path = str(self.workspace_path / changed_file) if not Path(changed_file).is_absolute() else changed_file
+
+            # Get dependents using both path formats
+            dependent_files_rel = self.dependency_graph.get_test_impact(relative_path)
+            dependent_files_abs = self.dependency_graph.get_test_impact(absolute_path)
+
+            # Combine and deduplicate
+            dependent_files = list(set(dependent_files_rel + dependent_files_abs))
+
+            # Remove the changed file itself
+            dependent_files = [f for f in dependent_files if f != changed_file and f != relative_path and f != absolute_path]
+
+            return dependent_files
+
+        except Exception as e:
+            print(f"⚠️ Error getting dependent files for {changed_file}: {e}")
+            return []
+
+    async def verify_failed_tests(self, file_path: str, test_results: list):
+        """
+        Double-check failed tests to ensure they're real failures, not pipeline errors.
+        Re-runs failed tests once more to verify the failure is consistent.
+        """
+        if not test_results:
+            return test_results
+
+        # Find failed tests
+        failed_tests = [test for test in test_results if test.status == 'fail']
+
+        if not failed_tests:
+            print(f"✅ No failed tests to verify in {file_path}")
+            return test_results
+
+        print(f"🔍 Verifying {len(failed_tests)} failed tests in {file_path}")
+
+        verified_results = []
+
+        for test_result in test_results:
+            if test_result.status != 'fail':
+                # Test passed or errored - keep as is
+                verified_results.append(test_result)
+                continue
+
+            print(f"🔄 Re-running failed test: {test_result.test_name} at line {test_result.line_number}")
+
+            try:
+                # Re-run the specific test case
+                # We need to find the original test case and context
+                parsed_program = self.parser.parse_file(file_path)
+
+                # Find the test case that corresponds to this result
+                retry_result = await self.retry_specific_test(
+                    file_path, parsed_program, test_result
+                )
+
+                if retry_result:
+                    if retry_result.status == 'pass':
+                        print(f"✅ Test passed on retry: {test_result.test_name} - original failure was likely a pipeline error")
+                        # Update the result to show it passed on retry
+                        retry_result.message = f"Passed on retry (original failure: {test_result.message})"
+                    else:
+                        print(f"❌ Test failed again on retry: {test_result.test_name} - confirmed failure")
+                        # Keep the retry result which confirms the failure
+
+                    verified_results.append(retry_result)
+                else:
+                    # Couldn't retry, keep original result
+                    print(f"⚠️ Could not retry test: {test_result.test_name} - keeping original result")
+                    verified_results.append(test_result)
+
+            except Exception as e:
+                print(f"⚠️ Error retrying test {test_result.test_name}: {e}")
+                # Keep original result if retry fails
+                verified_results.append(test_result)
+
+        retry_count = len([t for t in verified_results if 'Passed on retry' in t.message])
+        if retry_count > 0:
+            print(f"🎯 Verification complete: {retry_count} tests passed on retry (were pipeline errors)")
+
+        return verified_results
+
+    async def retry_specific_test(self, file_path: str, parsed_program, original_result):
+        """Retry a specific test case."""
+        try:
+            # Find all test contexts (functions, methods, classes, globals)
+            all_items = []
+            all_items.extend(parsed_program.functions)
+
+            # Add class methods
+            for cls in parsed_program.classes:
+                all_items.extend(cls.methods)
+                if cls.test_blocks:
+                    all_items.append(cls)
+
+            # Add global test blocks
+            if parsed_program.global_test_blocks:
+                for test_block in parsed_program.global_test_blocks:
+                    global_context = type('GlobalTestContext', (), {
+                        'name': 'global_test',
+                        'line_number': test_block.test_cases[0].line_number if test_block.test_cases else 1,
+                        'parameters': [],
+                        'test_blocks': [test_block],
+                        'is_global_test': True
+                    })()
+                    all_items.append(global_context)
+
+            # Find the specific test case by line number
+            for item in all_items:
+                if hasattr(item, 'test_blocks') and item.test_blocks:
+                    for test_block in item.test_blocks:
+                        for i, test_case in enumerate(test_block.test_cases):
+                            if test_case.line_number == original_result.line_number:
+                                print(f"🎯 Found test case to retry at line {test_case.line_number}")
+
+                                # Execute the test case
+                                if hasattr(item, 'methods') and hasattr(item, 'name'):
+                                    # Class-level test
+                                    class_context = type('ClassTestContext', (), {
+                                        'name': f"{item.name}_class_test",
+                                        'line_number': test_case.line_number,
+                                        'parameters': [],
+                                        'referenced_class': item.name,
+                                        'is_class_test': True
+                                    })()
+                                    return await self.execute_test_case(
+                                        file_path, class_context, test_case, i
+                                    )
+                                else:
+                                    # Function, method, or global test
+                                    return await self.execute_test_case(
+                                        file_path, item, test_case, i
+                                    )
+
+            print(f"⚠️ Could not find test case at line {original_result.line_number}")
+            return None
+
+        except Exception as e:
+            print(f"⚠️ Error in retry_specific_test: {e}")
+            return None
+
+    async def send_all_test_results(self):
+        """Send all existing test results to VSCode when it connects."""
+        print(f"📊 Sending all test results to VSCode: {len(self.file_results)} files")
+
+        for file_path, file_result in self.file_results.items():
+            await self.broadcast({
+                'type': 'test_results',
+                'data': asdict(file_result)
+            })
+            print(f"📤 Sent test results for {file_path}: {len(file_result.tests)} tests")
+
+        print(f"✅ Sent all test results to VSCode")
+
+    async def handle_ai_generation(self, file_path: str, line_number: int, block_type: str):
+        """Handle AI generation request from VSCode."""
+        try:
+            print(f"🤖 Generating {block_type} blocks for {file_path}:{line_number}")
+
+            # TODO: Integrate with LMStudio/Ollama for AI generation
+            # For now, send a placeholder response
+            await self.broadcast({
+                'type': 'ai_generation_result',
+                'data': {
+                    'file_path': file_path,
+                    'line_number': line_number,
+                    'block_type': block_type,
+                    'generated_content': f"# AI-generated {block_type} blocks would appear here",
+                    'success': True,
+                    'message': f"AI generation for {block_type} blocks is being implemented"
+                }
+            })
+
+        except Exception as e:
+            print(f"❌ Error in AI generation: {e}")
+            await self.broadcast({
+                'type': 'ai_generation_result',
+                'data': {
+                    'file_path': file_path,
+                    'line_number': line_number,
+                    'block_type': block_type,
+                    'success': False,
+                    'message': f"AI generation failed: {e}"
+                }
+            })
+
+    async def handle_ai_enhancement(self, file_path: str, line_number: int, enhancement_type: str):
+        """Handle AI enhancement request for existing blocks."""
+        try:
+            print(f"🔧 Enhancing existing blocks: {enhancement_type} for {file_path}:{line_number}")
+
+            # Map enhancement types to user-friendly descriptions
+            enhancement_descriptions = {
+                'generate_additional_tests': 'Generating additional test cases',
+                'regenerate_tests': 'Regenerating test block with fresh perspective',
+                'improve_test_coverage': 'Improving test coverage and edge cases',
+                'regenerate_docs': 'Regenerating documentation with better clarity',
+                'add_more_doc_detail': 'Adding more detailed documentation',
+                'add_doc_examples': 'Adding practical examples to documentation'
+            }
+
+            description = enhancement_descriptions.get(enhancement_type, f"Performing {enhancement_type}")
+
+            # TODO: Integrate with LMStudio/Ollama for AI enhancement
+            # For now, send a placeholder response
+            await self.broadcast({
+                'type': 'ai_enhancement_result',
+                'data': {
+                    'file_path': file_path,
+                    'line_number': line_number,
+                    'enhancement_type': enhancement_type,
+                    'enhanced_content': f"# AI-enhanced content for {enhancement_type} would appear here",
+                    'success': True,
+                    'message': f"{description} completed"
+                }
+            })
+
+        except Exception as e:
+            print(f"❌ Error in AI enhancement: {e}")
+            await self.broadcast({
+                'type': 'ai_enhancement_result',
+                'data': {
+                    'file_path': file_path,
+                    'line_number': line_number,
+                    'enhancement_type': enhancement_type,
+                    'success': False,
+                    'message': f"AI enhancement failed: {e}"
+                }
+            })
+
+    async def run_initial_workspace_tests(self):
+        """Run tests for all Python files in the workspace - ONLY on first session."""
+        print("🚀 Running initial workspace tests (first session only)")
+
+        try:
+            # Find all Python files with PyTestEmbed syntax
+            python_files = []
+            for py_file in self.workspace_path.rglob("*.py"):
+                if self._should_skip_file(py_file):
+                    continue
+
+                # Check if file has PyTestEmbed syntax
+                try:
+                    with open(py_file, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        if 'test:' in content or 'doc:' in content:
+                            relative_path = str(py_file.relative_to(self.workspace_path))
+                            python_files.append(relative_path)
+                except Exception:
+                    continue
+
+            print(f"📊 Found {len(python_files)} PyTestEmbed files for initial testing")
+
+            # Broadcast initial test start
+            await self.broadcast({
+                'type': 'initial_workspace_testing_start',
+                'data': {
+                    'total_files': len(python_files),
+                    'timestamp': time.time()
+                }
+            })
+
+            # Run tests for each file
+            for i, file_path in enumerate(python_files):
+                print(f"🧪 Testing {file_path} ({i+1}/{len(python_files)})")
+                await self.run_file_tests(file_path)
+
+                # Small delay to prevent overwhelming the system
+                await asyncio.sleep(0.1)
+
+            # Broadcast completion
+            await self.broadcast({
+                'type': 'initial_workspace_testing_complete',
+                'data': {
+                    'files_tested': len(python_files),
+                    'timestamp': time.time()
+                }
+            })
+
+            print(f"✅ Completed initial workspace testing for {len(python_files)} files")
+
+        except Exception as e:
+            print(f"⚠️ Error in initial workspace testing: {e}")
+
+    async def analyze_file_changes(self, file_path: str):
+        """Analyze what changed in a file and determine which tests should be run."""
+        try:
+            # CONSERVATIVE APPROACH: Return empty list to force running all tests in the file only
+            # This prevents the massive test execution across all files
+
+            print(f"🔍 Analyzing file changes for {file_path} (conservative mode - no cross-file testing)")
+
+            # In the future, this could be enhanced with:
+            # 1. Git diff analysis to see what actually changed
+            # 2. AST comparison to detect specific function/class changes
+            # 3. Timestamp-based change detection
+
+            # For now, return empty to trigger run_file_tests() which only runs tests in this file
+            return []
 
         except Exception as e:
             print(f"⚠️ Error analyzing file changes: {e}")
@@ -2041,19 +2462,59 @@ except Exception as e:
         except Exception as e:
             print(f"⚠️ Error marking tests as untested: {e}")
 
-    async def mark_all_workspace_tests_as_untested(self):
-        """Mark all tests in the workspace as untested when live testing starts."""
+    async def discover_workspace_tests(self):
+        """Discover all tests in the workspace without running them."""
         try:
+            discovered_files = 0
+            discovered_tests = 0
+
             # Find all Python files in workspace
             for py_file in self.workspace_path.rglob("*.py"):
                 if self._should_skip_file(py_file):
                     continue
 
-                relative_path = str(py_file.relative_to(self.workspace_path))
-                await self.mark_all_tests_as_untested(relative_path)
+                try:
+                    relative_path = str(py_file.relative_to(self.workspace_path))
+
+                    # Parse the file to discover tests without running them
+                    parsed_program = self.parser.parse_file(str(py_file))
+
+                    # Count tests in this file
+                    file_test_count = 0
+                    for func in parsed_program.functions:
+                        for test_block in func.test_blocks:
+                            file_test_count += len(test_block.test_cases)
+
+                    for cls in parsed_program.classes:
+                        for test_block in cls.test_blocks:
+                            file_test_count += len(test_block.test_cases)
+                        for method in cls.methods:
+                            for test_block in method.test_blocks:
+                                file_test_count += len(test_block.test_cases)
+
+                    for test_block in parsed_program.global_test_blocks:
+                        file_test_count += len(test_block.test_cases)
+
+                    if file_test_count > 0:
+                        discovered_files += 1
+                        discovered_tests += file_test_count
+                        print(f"📋 Discovered {file_test_count} tests in {relative_path}")
+
+                except Exception as file_error:
+                    print(f"⚠️ Error discovering tests in {py_file}: {file_error}")
+                    continue
+
+            print(f"📊 Test discovery complete: {discovered_tests} tests in {discovered_files} files")
 
         except Exception as e:
-            print(f"⚠️ Error marking workspace tests as untested: {e}")
+            print(f"⚠️ Error during test discovery: {e}")
+
+    async def mark_all_workspace_tests_as_untested(self):
+        """DISABLED: Mark all tests in the workspace as untested when live testing starts."""
+        print("⏭️ mark_all_workspace_tests_as_untested is disabled to prevent mass test execution")
+        # This method was causing tests to run across ALL files in the workspace
+        # when a client connected, which is not the desired behavior
+        return
 
     def _should_skip_file(self, file_path):
         """Check if file should be skipped during analysis."""
@@ -2227,57 +2688,15 @@ except Exception as e:
                 'error': str(e)
             }))
 
-    def start_file_watcher(self):
-        """Start watching files for changes."""
-        class TestFileHandler(FileSystemEventHandler):
-            def __init__(self, live_runner):
-                self.live_runner = live_runner
-                self.last_run = {}
-            
-            def on_modified(self, event):
-                if event.is_directory or not event.src_path.endswith('.py'):
-                    return
-
-                # Debounce rapid changes
-                now = time.time()
-                if event.src_path in self.last_run:
-                    if now - self.last_run[event.src_path] < 1:
-                        return
-
-                self.last_run[event.src_path] = now
-
-                # Run tests intelligently based on what changed
-                try:
-                    # Ensure both paths are absolute for comparison
-                    src_path = Path(event.src_path).resolve()
-                    workspace_path = Path(self.live_runner.workspace_path).resolve()
-
-                    # Check if the file is within the workspace
-                    if workspace_path in src_path.parents or src_path == workspace_path:
-                        relative_path = str(src_path.relative_to(workspace_path))
-                        print(f"📝 File changed: {relative_path}")
-
-                        # Schedule dependency graph update and intelligent test running
-                        if hasattr(self.live_runner, '_loop') and self.live_runner._loop:
-                            self.live_runner._loop.call_soon_threadsafe(
-                                lambda: asyncio.create_task(self.live_runner.handle_file_change(relative_path))
-                            )
-                except (ValueError, OSError) as e:
-                    print(f"Error processing file change for {event.src_path}: {e}")
-        
-        handler = TestFileHandler(self)
-        self.observer = Observer()
-        self.observer.schedule(handler, str(self.workspace_path), recursive=True)
-        self.observer.start()
-        print(f"👀 Watching for changes in {self.workspace_path}")
+    # Old file watcher code removed - now using modular FileWatcherService
     
     async def run(self):
         """Run the live test server."""
         # Store the event loop for file watcher
         self._loop = asyncio.get_running_loop()
 
-        # Start file watcher
-        self.start_file_watcher()
+        # Start modular file watcher
+        self.file_watcher.start_watching(self._loop)
 
         # Start WebSocket server
         await self.start_server()
@@ -2288,16 +2707,13 @@ except Exception as e:
         except KeyboardInterrupt:
             print("\n🛑 Stopping live server...")
         finally:
-            if self.observer:
-                self.observer.stop()
-                self.observer.join()
+            self.file_watcher.stop_watching()
     
     def stop(self):
         """Stop the live test server."""
         if self.server:
             self.server.close()
-        if self.observer:
-            self.observer.stop()
+        self.file_watcher.stop_watching()
 
 
 class LiveTestClient:

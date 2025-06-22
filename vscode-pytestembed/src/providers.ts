@@ -4,7 +4,7 @@
 
 import * as vscode from 'vscode';
 import { state } from './state';
-import { runIndividualTest } from './liveTesting';
+// Removed - VSCode is now a pure display client
 import { BlockType } from './types';
 
 /**
@@ -308,6 +308,64 @@ class PyTestEmbedQuickFixProvider implements vscode.CodeActionProvider {
         const line = document.lineAt(range.start.line);
         const trimmed = line.text.trim();
 
+        // Quick actions for test: blocks
+        if (trimmed === 'test:') {
+            const lineNumber = range.start.line + 1;
+
+            const generateMoreAction = new vscode.CodeAction('➕ Generate Another Test', vscode.CodeActionKind.QuickFix);
+            generateMoreAction.command = {
+                command: 'pytestembed.generateAdditionalTests',
+                title: 'Generate Another Test',
+                arguments: [document.uri, lineNumber]
+            };
+            actions.push(generateMoreAction);
+
+            const regenerateAction = new vscode.CodeAction('🔄 Regenerate Tests', vscode.CodeActionKind.QuickFix);
+            regenerateAction.command = {
+                command: 'pytestembed.regenerateTests',
+                title: 'Regenerate Tests',
+                arguments: [document.uri, lineNumber]
+            };
+            actions.push(regenerateAction);
+
+            const improveCoverageAction = new vscode.CodeAction('🎯 Improve Test Coverage', vscode.CodeActionKind.QuickFix);
+            improveCoverageAction.command = {
+                command: 'pytestembed.improveTestCoverage',
+                title: 'Improve Test Coverage',
+                arguments: [document.uri, lineNumber]
+            };
+            actions.push(improveCoverageAction);
+        }
+
+        // Quick actions for doc: blocks
+        if (trimmed === 'doc:') {
+            const lineNumber = range.start.line + 1;
+
+            const regenerateDocAction = new vscode.CodeAction('🔄 Regenerate Docs', vscode.CodeActionKind.QuickFix);
+            regenerateDocAction.command = {
+                command: 'pytestembed.regenerateDocs',
+                title: 'Regenerate Docs',
+                arguments: [document.uri, lineNumber]
+            };
+            actions.push(regenerateDocAction);
+
+            const addDetailAction = new vscode.CodeAction('📖 Add More Detail', vscode.CodeActionKind.QuickFix);
+            addDetailAction.command = {
+                command: 'pytestembed.addMoreDocDetail',
+                title: 'Add More Detail',
+                arguments: [document.uri, lineNumber]
+            };
+            actions.push(addDetailAction);
+
+            const addExamplesAction = new vscode.CodeAction('📝 Add Examples', vscode.CodeActionKind.QuickFix);
+            addExamplesAction.command = {
+                command: 'pytestembed.addDocExamples',
+                title: 'Add Examples',
+                arguments: [document.uri, lineNumber]
+            };
+            actions.push(addExamplesAction);
+        }
+
         // Quick actions for function definitions
         if (trimmed.startsWith('def ') && trimmed.includes('(') && trimmed.endsWith(':')) {
             const lineNumber = range.start.line + 1;
@@ -350,17 +408,8 @@ class PyTestEmbedQuickFixProvider implements vscode.CodeActionProvider {
         }
 
         // Individual test execution (if live testing is active)
-        if (state.liveTestingEnabled && this.isTestExpression(trimmed)) {
-            const lineNumber = range.start.line;
-
-            const runTestAction = new vscode.CodeAction('Run This Test', vscode.CodeActionKind.QuickFix);
-            runTestAction.command = {
-                command: 'pytestembed.runIndividualTest',
-                title: 'Run This Test',
-                arguments: [document.fileName, lineNumber]
-            };
-            actions.push(runTestAction);
-        }
+        // VSCode is now a pure display client - no individual test execution
+        // All test execution is handled by the Python server automatically
 
         return actions;
     }
