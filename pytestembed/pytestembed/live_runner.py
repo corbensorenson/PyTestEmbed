@@ -15,8 +15,7 @@ import shutil
 from pathlib import Path
 from typing import Dict, List, Optional, Callable, Any
 from dataclasses import dataclass, asdict
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
+# File watching is now handled by the dedicated file watcher service
 import websockets
 import websockets.server
 from .parser import PyTestEmbedParser
@@ -56,26 +55,28 @@ class FileTestResults:
 class LiveTestRunner:
     """Runs tests in real-time and provides instant feedback."""
     
-    def __init__(self, workspace_path: str, port: int = 8765):
+    def __init__(self, workspace_path: str, port: int = 8765, file_watcher_port: int = 8767, dependency_service_port: int = 8769):
         self.workspace_path = Path(workspace_path)
         self.port = port
+        self.file_watcher_port = file_watcher_port
+        self.dependency_service_port = dependency_service_port
         self.clients = set()
         self.file_results: Dict[str, FileTestResults] = {}
         self.parser = PyTestEmbedParser()
         self.generator = TestGenerator()
         self.runner = TestRunner()
-        self.observer = None
         self.server = None
 
-        # Advanced testing features
+        # File watcher connection
+        self.file_watcher_ws = None
+        self.dependency_service_ws = None
+        self._loop = None
+
+        # Advanced testing features (but no dependency graph - that's handled by dependency service)
         self.smart_selector = SmartTestSelector(str(workspace_path))
         self.failure_predictor = FailurePredictor(str(workspace_path))
         self.property_tester = PropertyBasedTester(str(workspace_path))
-        self.dependency_graph = CodeDependencyGraph(str(workspace_path))
         self.smart_testing_enabled = True
-
-        # Build dependency graph on startup
-        self.dependency_graph.build_graph()
 
         # Garbage collection settings
         self.temp_cleanup_interval = 300  # 5 minutes
@@ -84,7 +85,152 @@ class LiveTestRunner:
 
         # Start garbage collection
         self._start_garbage_collection()
-        
+
+    async def connect_to_file_watcher(self):
+        """Connect to the file watcher service."""
+        try:
+            self.file_watcher_ws = await websockets.connect(f"ws://localhost:{self.file_watcher_port}")
+            print(f"🔗 Connected to File Watcher Service on port {self.file_watcher_port}")
+
+            # Register this service with the file watcher
+            await self.file_watcher_ws.send(json.dumps({
+                'command': 'register_service',
+                'service_name': 'live_test_runner',
+                'file_patterns': ['*.py'],
+                'port': self.port
+            }))
+
+            # Start listening for file change notifications
+            asyncio.create_task(self.listen_to_file_watcher())
+
+        except Exception as e:
+            print(f"⚠️ Failed to connect to File Watcher Service: {e}")
+            self.file_watcher_ws = None
+
+    async def connect_to_dependency_service(self):
+        """Connect to the dependency service."""
+        try:
+            self.dependency_service_ws = await websockets.connect(f"ws://localhost:{self.dependency_service_port}")
+            print(f"🔗 Connected to Dependency Service on port {self.dependency_service_port}")
+
+            # Start listening for dependency service responses
+            asyncio.create_task(self.listen_to_dependency_service())
+
+        except Exception as e:
+            print(f"⚠️ Failed to connect to Dependency Service: {e}")
+            self.dependency_service_ws = None
+
+    async def listen_to_dependency_service(self):
+        """Listen for responses from the dependency service."""
+        if not self.dependency_service_ws:
+            return
+
+        try:
+            async for message in self.dependency_service_ws:
+                data = json.loads(message)
+
+                if data.get('type') == 'test_impact_analysis':
+                    await self.handle_test_impact_response(data)
+                elif data.get('type') == 'file_analysis_complete':
+                    await self.handle_file_analysis_complete(data)
+                elif data.get('type') == 'dependency_graph_updated':
+                    await self.handle_dependency_graph_updated(data)
+
+        except websockets.exceptions.ConnectionClosed:
+            print("📡 Connection to Dependency Service closed")
+            self.dependency_service_ws = None
+        except Exception as e:
+            print(f"⚠️ Error listening to Dependency Service: {e}")
+
+    async def handle_test_impact_response(self, data: dict):
+        """Handle test impact analysis response from dependency service."""
+        changed_file = data.get('changed_file')
+        impact_files = data.get('impact_files', [])
+
+        print(f"📊 Received test impact analysis for {changed_file}: {len(impact_files)} files affected")
+
+        # Run tests in dependent files
+        for file_path in impact_files:
+            if file_path.endswith('.py') and file_path != changed_file:
+                print(f"🔗 Running tests in dependent file: {file_path}")
+                await self.run_file_tests(file_path)
+
+    async def handle_file_analysis_complete(self, data: dict):
+        """Handle file analysis completion from dependency service."""
+        file_path = data.get('file_path')
+        print(f"✅ Dependency analysis complete for {file_path}")
+
+        # Broadcast dependency graph update to connected clients
+        await self.broadcast({
+            'type': 'dependency_graph_updated',
+            'data': {
+                'changed_file': file_path,
+                'timestamp': data.get('timestamp', time.time())
+            }
+        })
+
+        # Clear dependency cache for affected elements
+        await self.clear_dependency_cache_for_file(file_path)
+
+    async def handle_dependency_graph_updated(self, data: dict):
+        """Handle dependency graph update notifications."""
+        # Forward the notification to connected IDE clients
+        await self.broadcast({
+            'type': 'dependency_graph_updated',
+            'data': data.get('data', {})
+        })
+
+    async def listen_to_file_watcher(self):
+        """Listen for file change notifications from the file watcher service."""
+        if not self.file_watcher_ws:
+            return
+
+        try:
+            async for message in self.file_watcher_ws:
+                data = json.loads(message)
+
+                if data.get('type') == 'file_change':
+                    change_data = data.get('data', {})
+                    skip_test_execution = data.get('skip_test_execution', False)
+
+                    if not skip_test_execution:
+                        # Handle the file change by running tests
+                        await self.handle_file_change_notification(change_data)
+                    else:
+                        print(f"⏭️ Skipping test execution for {change_data.get('relative_path')}")
+
+                elif data.get('type') == 'service_registered':
+                    print(f"✅ Registered with File Watcher Service")
+
+        except websockets.exceptions.ConnectionClosed:
+            print("📡 Connection to File Watcher Service closed")
+            self.file_watcher_ws = None
+        except Exception as e:
+            print(f"⚠️ Error listening to File Watcher Service: {e}")
+
+    async def handle_file_change_notification(self, change_data: dict):
+        """Handle file change notifications from the file watcher service."""
+        relative_path = change_data.get('relative_path')
+        is_python_file = change_data.get('is_python_file', False)
+
+        if not is_python_file:
+            return
+
+        print(f"📝 Handling file change notification: {relative_path}")
+
+        # Request dependency analysis from dependency service
+        if self.dependency_service_ws:
+            try:
+                await self.dependency_service_ws.send(json.dumps({
+                    'command': 'analyze_file_change',
+                    'file_path': relative_path
+                }))
+            except Exception as e:
+                print(f"⚠️ Failed to request dependency analysis: {e}")
+
+        # Run intelligent tests for the changed file
+        await self.run_intelligent_tests(relative_path)
+
     async def start_server(self):
         """Start the WebSocket server for IDE communication."""
         print(f"🚀 Starting PyTestEmbed Live Server on port {self.port}")
@@ -350,45 +496,6 @@ class LiveTestRunner:
                 'timestamp': time.time()
             })
 
-    async def handle_file_change(self, changed_file: str):
-        """Handle file changes by updating dependency graph and running intelligent tests."""
-        print(f"📝 Handling file change: {changed_file}")
-
-        # Skip test running for certain files to avoid interference
-        skip_test_files = ['quick_test.py', 'simple_dependency_test.py', 'test_enhanced_tooltips.py']
-        if any(skip_file in changed_file for skip_file in skip_test_files):
-            print(f"⏭️ Skipping test execution for {changed_file}")
-            return
-
-        try:
-            # Update dependency graph for the changed file
-            print(f"🔗 Updating dependency graph for {changed_file}")
-            full_path = str(self.workspace_path / changed_file)
-
-            # Rebuild the dependency graph to reflect changes
-            # This is more efficient than rebuilding the entire graph
-            self.dependency_graph.update_file_dependencies(full_path)
-
-            # Broadcast dependency graph update to connected clients
-            await self.broadcast({
-                'type': 'dependency_graph_updated',
-                'data': {
-                    'changed_file': changed_file,
-                    'timestamp': time.time()
-                }
-            })
-
-            # Clear dependency cache for affected elements
-            await self.clear_dependency_cache_for_file(changed_file)
-
-            # Now run intelligent tests
-            await self.run_intelligent_tests(changed_file)
-
-        except Exception as e:
-            print(f"⚠️ Error handling file change: {e}")
-            # Fallback to just running tests
-            await self.run_intelligent_tests(changed_file)
-
     async def clear_dependency_cache_for_file(self, file_path: str):
         """Clear cached dependency information for elements in the changed file."""
         # This will be used by VSCode extension to invalidate cached hover information
@@ -428,15 +535,17 @@ class LiveTestRunner:
                 # Fallback to running all tests in the file
                 await self.run_file_tests(changed_file)
 
-            # Also check for dependency impacts (other files that might be affected)
-            try:
-                impact_files = self.dependency_graph.get_test_impact(changed_file)
-                for file_path in impact_files:
-                    if file_path.endswith('.py') and file_path != changed_file:
-                        print(f"🔗 Running tests in dependent file: {file_path}")
-                        await self.run_file_tests(file_path)
-            except Exception as dep_error:
-                print(f"⚠️ Error in dependency analysis: {dep_error}")
+            # Request dependency impact analysis from dependency service
+            if self.dependency_service_ws:
+                try:
+                    await self.dependency_service_ws.send(json.dumps({
+                        'command': 'get_test_impact',
+                        'file_path': changed_file
+                    }))
+                    # Note: The dependency service will send back impact files
+                    # which we'll handle in a separate message handler
+                except Exception as dep_error:
+                    print(f"⚠️ Error requesting dependency analysis: {dep_error}")
 
         except Exception as e:
             print(f"⚠️ Error in intelligent test selection: {e}")
@@ -2227,57 +2336,16 @@ except Exception as e:
                 'error': str(e)
             }))
 
-    def start_file_watcher(self):
-        """Start watching files for changes."""
-        class TestFileHandler(FileSystemEventHandler):
-            def __init__(self, live_runner):
-                self.live_runner = live_runner
-                self.last_run = {}
-            
-            def on_modified(self, event):
-                if event.is_directory or not event.src_path.endswith('.py'):
-                    return
-
-                # Debounce rapid changes
-                now = time.time()
-                if event.src_path in self.last_run:
-                    if now - self.last_run[event.src_path] < 1:
-                        return
-
-                self.last_run[event.src_path] = now
-
-                # Run tests intelligently based on what changed
-                try:
-                    # Ensure both paths are absolute for comparison
-                    src_path = Path(event.src_path).resolve()
-                    workspace_path = Path(self.live_runner.workspace_path).resolve()
-
-                    # Check if the file is within the workspace
-                    if workspace_path in src_path.parents or src_path == workspace_path:
-                        relative_path = str(src_path.relative_to(workspace_path))
-                        print(f"📝 File changed: {relative_path}")
-
-                        # Schedule dependency graph update and intelligent test running
-                        if hasattr(self.live_runner, '_loop') and self.live_runner._loop:
-                            self.live_runner._loop.call_soon_threadsafe(
-                                lambda: asyncio.create_task(self.live_runner.handle_file_change(relative_path))
-                            )
-                except (ValueError, OSError) as e:
-                    print(f"Error processing file change for {event.src_path}: {e}")
-        
-        handler = TestFileHandler(self)
-        self.observer = Observer()
-        self.observer.schedule(handler, str(self.workspace_path), recursive=True)
-        self.observer.start()
-        print(f"👀 Watching for changes in {self.workspace_path}")
-    
     async def run(self):
         """Run the live test server."""
-        # Store the event loop for file watcher
+        # Store the event loop for service connections
         self._loop = asyncio.get_running_loop()
 
-        # Start file watcher
-        self.start_file_watcher()
+        # Connect to file watcher service
+        await self.connect_to_file_watcher()
+
+        # Connect to dependency service
+        await self.connect_to_dependency_service()
 
         # Start WebSocket server
         await self.start_server()
@@ -2288,16 +2356,16 @@ except Exception as e:
         except KeyboardInterrupt:
             print("\n🛑 Stopping live server...")
         finally:
-            if self.observer:
-                self.observer.stop()
-                self.observer.join()
-    
+            # Close service connections
+            if self.file_watcher_ws:
+                await self.file_watcher_ws.close()
+            if self.dependency_service_ws:
+                await self.dependency_service_ws.close()
+
     def stop(self):
         """Stop the live test server."""
         if self.server:
             self.server.close()
-        if self.observer:
-            self.observer.stop()
 
 
 class LiveTestClient:
@@ -2429,9 +2497,9 @@ class LiveTestClient:
 
 
 # CLI command for starting live server
-async def start_live_server(workspace: str = ".", port: int = 8765):
+async def start_live_server(workspace: str = ".", port: int = 8765, file_watcher_port: int = 8767, dependency_service_port: int = 8769):
     """Start the live test server."""
-    runner = LiveTestRunner(workspace, port)
+    runner = LiveTestRunner(workspace, port, file_watcher_port, dependency_service_port)
     await runner.run()
 
 
@@ -2439,5 +2507,7 @@ if __name__ == "__main__":
     import sys
     workspace = sys.argv[1] if len(sys.argv) > 1 else "."
     port = int(sys.argv[2]) if len(sys.argv) > 2 else 8765
-    
-    asyncio.run(start_live_server(workspace, port))
+    file_watcher_port = int(sys.argv[3]) if len(sys.argv) > 3 else 8767
+    dependency_service_port = int(sys.argv[4]) if len(sys.argv) > 4 else 8769
+
+    asyncio.run(start_live_server(workspace, port, file_watcher_port, dependency_service_port))

@@ -340,19 +340,135 @@ def init(project_name, path, framework, ai_provider, ide, no_git, no_ci):
 @cli.command()
 @click.option('--port', default=8765, help='Port for live test server')
 @click.option('--workspace', default='.', help='Workspace directory to watch')
-def live(port, workspace):
-    """Start live test server for IDE integration."""
+@click.option('--file-watcher-port', default=8767, help='Port for file watcher service')
+@click.option('--dependency-port', default=8769, help='Port for dependency service')
+def live(port, workspace, file_watcher_port, dependency_port):
+    """Start live test server for IDE integration (requires file watcher and dependency services)."""
     import asyncio
     from .live_runner import start_live_server
 
     click.echo(f"🚀 Starting PyTestEmbed Live Server on port {port}")
+    click.echo(f"📁 Workspace: {workspace}")
+    click.echo(f"🔗 Connecting to File Watcher on port {file_watcher_port}")
+    click.echo(f"🔗 Connecting to Dependency Service on port {dependency_port}")
+    click.echo("Press Ctrl+C to stop")
+
+    try:
+        asyncio.run(start_live_server(workspace, port, file_watcher_port, dependency_port))
+    except KeyboardInterrupt:
+        click.echo("\n👋 Live server stopped")
+
+
+@cli.command()
+@click.option('--port', default=8767, help='Port for file watcher service')
+@click.option('--workspace', default='.', help='Workspace directory to watch')
+def file_watcher(port, workspace):
+    """Start file watcher service."""
+    import asyncio
+    from .file_watcher_service import start_file_watcher_service
+
+    click.echo(f"👀 Starting File Watcher Service on port {port}")
     click.echo(f"📁 Watching workspace: {workspace}")
     click.echo("Press Ctrl+C to stop")
 
     try:
-        asyncio.run(start_live_server(workspace, port))
+        asyncio.run(start_file_watcher_service(workspace, port))
     except KeyboardInterrupt:
-        click.echo("\n👋 Live server stopped")
+        click.echo("\n👋 File watcher stopped")
+
+
+@cli.command()
+@click.option('--port', default=8769, help='Port for dependency service')
+@click.option('--workspace', default='.', help='Workspace directory')
+@click.option('--file-watcher-port', default=8767, help='Port for file watcher service')
+def dependency_service(port, workspace, file_watcher_port):
+    """Start dependency graph service."""
+    import asyncio
+    from .dependency_service import main as start_dependency_service
+
+    click.echo(f"🔗 Starting Dependency Service on port {port}")
+    click.echo(f"📁 Workspace: {workspace}")
+    click.echo(f"🔗 Connecting to File Watcher on port {file_watcher_port}")
+    click.echo("Press Ctrl+C to stop")
+
+    try:
+        # Set up sys.argv for the dependency service main function
+        import sys
+        original_argv = sys.argv
+        sys.argv = ['dependency_service', workspace, str(port)]
+        asyncio.run(start_dependency_service())
+    except KeyboardInterrupt:
+        click.echo("\n👋 Dependency service stopped")
+    finally:
+        sys.argv = original_argv
+
+
+@cli.command()
+@click.option('--workspace', default='.', help='Workspace directory')
+@click.option('--live-port', default=8765, help='Port for live test server')
+@click.option('--file-watcher-port', default=8767, help='Port for file watcher service')
+@click.option('--dependency-port', default=8769, help='Port for dependency service')
+def start_all(workspace, live_port, file_watcher_port, dependency_port):
+    """Start all PyTestEmbed services (file watcher, dependency service, and live test server)."""
+    import asyncio
+    import subprocess
+    import sys
+    import time
+
+    click.echo("🚀 Starting all PyTestEmbed services...")
+    click.echo(f"📁 Workspace: {workspace}")
+
+    processes = []
+
+    try:
+        # Start file watcher service
+        click.echo(f"👀 Starting File Watcher Service on port {file_watcher_port}")
+        file_watcher_proc = subprocess.Popen([
+            sys.executable, '-m', 'pytestembed.file_watcher_service',
+            workspace, str(file_watcher_port)
+        ])
+        processes.append(('File Watcher', file_watcher_proc))
+        time.sleep(2)  # Give it time to start
+
+        # Start dependency service
+        click.echo(f"🔗 Starting Dependency Service on port {dependency_port}")
+        dependency_proc = subprocess.Popen([
+            sys.executable, '-m', 'pytestembed.dependency_service',
+            workspace, str(dependency_port)
+        ])
+        processes.append(('Dependency Service', dependency_proc))
+        time.sleep(2)  # Give it time to start
+
+        # Start live test server
+        click.echo(f"🚀 Starting Live Test Server on port {live_port}")
+        live_proc = subprocess.Popen([
+            sys.executable, '-m', 'pytestembed.live_runner',
+            workspace, str(live_port), str(file_watcher_port), str(dependency_port)
+        ])
+        processes.append(('Live Test Server', live_proc))
+
+        click.echo("✅ All services started successfully!")
+        click.echo("Press Ctrl+C to stop all services")
+
+        # Wait for all processes
+        while True:
+            time.sleep(1)
+            # Check if any process has died
+            for name, proc in processes:
+                if proc.poll() is not None:
+                    click.echo(f"⚠️ {name} has stopped unexpectedly")
+                    raise KeyboardInterrupt
+
+    except KeyboardInterrupt:
+        click.echo("\n🛑 Stopping all services...")
+        for name, proc in processes:
+            click.echo(f"🛑 Stopping {name}")
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+        click.echo("👋 All services stopped")
 
 
 @cli.command()
