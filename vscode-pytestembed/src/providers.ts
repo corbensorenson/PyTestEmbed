@@ -20,9 +20,7 @@ export function registerProviders(context: vscode.ExtensionContext) {
         )
     );
 
-    // Register status bar items
-    const statusBarManager = new StatusBarManager();
-    context.subscriptions.push(statusBarManager);
+    // Status bar items removed - test/doc block toggles moved to right-click menu
 
     // Register tree data provider for the explorer view
     const treeDataProvider = new PyTestEmbedTreeDataProvider();
@@ -36,17 +34,7 @@ export function registerProviders(context: vscode.ExtensionContext) {
         treeDataProvider: panelTreeDataProvider
     });
 
-    // Register Quick Fix provider
-    const quickFixProvider = new PyTestEmbedQuickFixProvider();
-    context.subscriptions.push(
-        vscode.languages.registerCodeActionsProvider(
-            { scheme: 'file', language: 'python' },
-            quickFixProvider,
-            {
-                providedCodeActionKinds: PyTestEmbedQuickFixProvider.providedCodeActionKinds
-            }
-        )
-    );
+    // Quick Fix provider moved to codeActionsProvider.ts
 
     // Register Hover provider for dependency information (disabled - using new hover provider)
     // const hoverProvider = new PyTestEmbedHoverProvider();
@@ -126,54 +114,7 @@ class PyTestEmbedFoldingProvider implements vscode.FoldingRangeProvider {
     }
 }
 
-/**
- * Status bar manager for PyTestEmbed controls
- */
-class StatusBarManager {
-    private testToggleItem: vscode.StatusBarItem;
-    private docToggleItem: vscode.StatusBarItem;
-
-    constructor() {
-        // Create status bar items (removed runTestsItem and generateDocsItem to save space)
-        this.testToggleItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-        this.docToggleItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 99);
-
-        // Configure items
-        this.testToggleItem.command = 'pytestembed.toggleTestBlocks';
-        this.testToggleItem.tooltip = 'Toggle Test Blocks Visibility';
-
-        this.docToggleItem.command = 'pytestembed.toggleDocBlocks';
-        this.docToggleItem.tooltip = 'Toggle Doc Blocks Visibility';
-
-        this.updateItems();
-        this.showItems();
-    }
-
-    updateItems() {
-        this.testToggleItem.text = state.testBlocksVisible ? '$(beaker) Tests' : '$(beaker-stop) Tests';
-        this.docToggleItem.text = state.docBlocksVisible ? '$(book) Docs' : '$(book) Docs';
-    }
-
-    showItems() {
-        const editor = vscode.window.activeTextEditor;
-        if (editor && editor.document.languageId === 'python' && isPyTestEmbedFile(editor.document)) {
-            this.testToggleItem.show();
-            this.docToggleItem.show();
-        } else {
-            this.hideItems();
-        }
-    }
-
-    hideItems() {
-        this.testToggleItem.hide();
-        this.docToggleItem.hide();
-    }
-
-    dispose() {
-        this.testToggleItem.dispose();
-        this.docToggleItem.dispose();
-    }
-}
+// Status bar manager removed - test/doc block toggles moved to right-click menu
 
 /**
  * Tree data provider for PyTestEmbed view
@@ -291,85 +232,7 @@ class PyTestEmbedItem extends vscode.TreeItem {
     }
 }
 
-/**
- * Quick Actions provider for PyTestEmbed functions
- */
-class PyTestEmbedQuickFixProvider implements vscode.CodeActionProvider {
-    public static readonly providedCodeActionKinds = [
-        vscode.CodeActionKind.QuickFix
-    ];
-
-    public provideCodeActions(document: vscode.TextDocument, range: vscode.Range | vscode.Selection, context: vscode.CodeActionContext, token: vscode.CancellationToken): vscode.CodeAction[] | undefined {
-        if (document.languageId !== 'python') {
-            return;
-        }
-
-        const actions: vscode.CodeAction[] = [];
-        const line = document.lineAt(range.start.line);
-        const trimmed = line.text.trim();
-
-        // Quick actions for function definitions
-        if (trimmed.startsWith('def ') && trimmed.includes('(') && trimmed.endsWith(':')) {
-            const lineNumber = range.start.line + 1;
-
-            // Quick Fix - analyze and fix function issues
-            const quickFixAction = new vscode.CodeAction('Quick Fix', vscode.CodeActionKind.QuickFix);
-            quickFixAction.command = {
-                command: 'pytestembed.quickFixFunction',
-                title: 'Quick Fix',
-                arguments: [document.uri, lineNumber]
-            };
-            actions.push(quickFixAction);
-
-            // Generate Test Block
-            const testAction = new vscode.CodeAction('Generate Test', vscode.CodeActionKind.QuickFix);
-            testAction.command = {
-                command: 'pytestembed.generateBlocksAtLine',
-                title: 'Generate Test',
-                arguments: [document.uri, lineNumber, 'test']
-            };
-            actions.push(testAction);
-
-            // Generate Doc Block
-            const docAction = new vscode.CodeAction('Generate Doc', vscode.CodeActionKind.QuickFix);
-            docAction.command = {
-                command: 'pytestembed.generateBlocksAtLine',
-                title: 'Generate Doc',
-                arguments: [document.uri, lineNumber, 'doc']
-            };
-            actions.push(docAction);
-
-            // Generate Both
-            const bothAction = new vscode.CodeAction('Generate Both', vscode.CodeActionKind.QuickFix);
-            bothAction.command = {
-                command: 'pytestembed.generateBlocksAtLine',
-                title: 'Generate Both',
-                arguments: [document.uri, lineNumber, 'both']
-            };
-            actions.push(bothAction);
-        }
-
-        // Individual test execution (if live testing is active)
-        if (state.liveTestingEnabled && this.isTestExpression(trimmed)) {
-            const lineNumber = range.start.line;
-
-            const runTestAction = new vscode.CodeAction('Run This Test', vscode.CodeActionKind.QuickFix);
-            runTestAction.command = {
-                command: 'pytestembed.runIndividualTest',
-                title: 'Run This Test',
-                arguments: [document.fileName, lineNumber]
-            };
-            actions.push(runTestAction);
-        }
-
-        return actions;
-    }
-
-    private isTestExpression(lineText: string): boolean {
-        // Check if this line contains a PyTestEmbed test expression
-        return /^\s*(.+?)\s*:\s*".*"[,]?$/.test(lineText);
-    }
-}
+// Quick Actions provider moved to codeActionsProvider.ts
 
 // OLD HOVER PROVIDER REMOVED - Using hoverProvider.ts instead
 

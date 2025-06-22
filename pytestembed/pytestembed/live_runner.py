@@ -78,6 +78,10 @@ class LiveTestRunner:
         # Dependency service process (will be started if needed)
         self.dependency_service_process = None
 
+        # Startup state tracking
+        self.initial_startup_complete = False
+        self.startup_tests_run = False
+
         # Advanced testing features (but no dependency graph - that's handled by dependency service)
         self.smart_selector = SmartTestSelector(str(workspace_path))
         self.failure_predictor = FailurePredictor(str(workspace_path))
@@ -313,23 +317,60 @@ class LiveTestRunner:
         
         async def handle_client(websocket, path):
             """Handle new client connections."""
-            self.clients.add(websocket)
-            print(f"📱 Client connected: {websocket.remote_address}")
-            
-            # Send current test results to new client
-            await self.send_all_results(websocket)
+            client_addr = websocket.remote_address
+            print(f"📱 Client connected: {client_addr}")
 
-            # Mark all tests in the workspace as untested initially
-            await self.mark_all_workspace_tests_as_untested()
-            
             try:
+                # Wait for the first message to determine if this is a health check
+                first_message = await asyncio.wait_for(websocket.recv(), timeout=1.0)
+
+                try:
+                    data = json.loads(first_message)
+                    command = data.get('command')
+
+                    # Handle health checks immediately without full client setup
+                    if command == 'health_check':
+                        print(f"🏥 Health check from {client_addr}")
+                        await self.handle_health_check(websocket)
+                        return  # Close connection after health check
+
+                except json.JSONDecodeError:
+                    pass  # Not a valid command, treat as regular client
+
+                # This is a regular client connection
+                self.clients.add(websocket)
+
+                # Only run startup tests on the very first connection
+                if not self.initial_startup_complete:
+                    print("🚀 First client connection - running initial startup tests")
+                    await self.run_initial_startup_tests()
+                    self.initial_startup_complete = True
+                else:
+                    print("🔄 Subsequent client connection - sending cached results")
+
+                # Send current test results to new client
+                await self.send_all_results(websocket)
+
+                # Handle the first message (if it wasn't a health check)
+                if command != 'health_check':
+                    await self.handle_message(websocket, first_message)
+
+                # Continue handling messages
+                async for message in websocket:
+                    await self.handle_message(websocket, message)
+
+            except asyncio.TimeoutError:
+                print(f"⏰ Client {client_addr} didn't send initial message, treating as regular client")
+                # Treat as regular client if no initial message
+                self.clients.add(websocket)
+                await self.send_all_results(websocket)
                 async for message in websocket:
                     await self.handle_message(websocket, message)
             except websockets.exceptions.ConnectionClosed:
                 pass
             finally:
-                self.clients.remove(websocket)
-                print(f"📱 Client disconnected: {websocket.remote_address}")
+                self.clients.discard(websocket)  # Use discard to avoid KeyError
+                print(f"📱 Client disconnected: {client_addr}")
         
         self.server = await websockets.serve(handle_client, "localhost", self.port)
         print(f"✅ Live server running at ws://localhost:{self.port}")
@@ -474,7 +515,57 @@ class LiveTestRunner:
                 'type': 'error',
                 'message': 'Invalid JSON message'
             }))
-    
+
+    async def handle_health_check(self, websocket):
+        """Handle health check request - lightweight status check."""
+        try:
+            await websocket.send(json.dumps({
+                'type': 'health_check',
+                'status': 'healthy',
+                'service': 'live_test_runner',
+                'cached_results': len(self.file_results),
+                'connected_clients': len(self.clients),
+                'startup_complete': self.initial_startup_complete,
+                'timestamp': time.time()
+            }))
+        except Exception as e:
+            print(f"⚠️ Error in health check: {e}")
+
+    async def run_initial_startup_tests(self):
+        """Run tests for all Python files in workspace on initial startup."""
+        if self.startup_tests_run:
+            print("⚠️ Startup tests already run, skipping")
+            return
+
+        print("🔍 Running initial startup tests for all Python files...")
+        self.startup_tests_run = True
+
+        try:
+            # Find all Python files in workspace
+            python_files = []
+            for file_path in self.workspace_path.rglob("*.py"):
+                if file_path.is_file():
+                    # Convert to relative path
+                    rel_path = str(file_path.relative_to(self.workspace_path))
+                    python_files.append(rel_path)
+
+            print(f"📁 Found {len(python_files)} Python files to test")
+
+            # Mark all tests as untested initially
+            await self.mark_all_workspace_tests_as_untested()
+
+            # Run tests for each file
+            for file_path in python_files:
+                try:
+                    await self.run_file_tests(file_path)
+                except Exception as e:
+                    print(f"⚠️ Error testing {file_path}: {e}")
+
+            print(f"✅ Initial startup tests completed for {len(python_files)} files")
+
+        except Exception as e:
+            print(f"❌ Error in initial startup tests: {e}")
+
     async def run_file_tests(self, file_path: str):
         """Run all tests in a file and broadcast results."""
         # Handle both absolute and relative paths
@@ -3106,20 +3197,6 @@ class LiveTestClient:
         """Disconnect from the server."""
         if self.websocket:
             await self.websocket.close()
-
-    async def handle_health_check(self, websocket):
-        """Handle health check request - lightweight status check."""
-        try:
-            await websocket.send(json.dumps({
-                'type': 'health_check',
-                'status': 'healthy',
-                'service': 'live_test_runner',
-                'cached_results': len(self.test_cache.cache),
-                'connected_clients': len(self.clients),
-                'timestamp': time.time()
-            }))
-        except Exception as e:
-            print(f"⚠️ Error in health check: {e}")
 
 
 # CLI command for starting live server

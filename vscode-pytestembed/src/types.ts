@@ -30,6 +30,10 @@ export interface ExtensionState {
     dependencyServiceEnabled: boolean;
     dependencyServiceProcess: cp.ChildProcess | null;
 
+    // AI generation service state
+    aiGenerationServiceEnabled: boolean;
+    aiGenerationServiceProcess: cp.ChildProcess | null;
+
     // MCP server state
     mcpServerEnabled: boolean;
     mcpServerProcess: cp.ChildProcess | null;
@@ -47,6 +51,7 @@ export interface ExtensionState {
     testProgressStatusBar: vscode.StatusBarItem;
     liveTestServerStatusBar: vscode.StatusBarItem;
     dependencyServiceStatusBar: vscode.StatusBarItem;
+    aiGenerationServiceStatusBar: vscode.StatusBarItem;
     mcpServerStatusBar: vscode.StatusBarItem;
     serverStatusCheckInterval: NodeJS.Timeout | undefined;
     documentChangeTimeout: NodeJS.Timeout | undefined;

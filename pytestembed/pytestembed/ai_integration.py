@@ -10,7 +10,7 @@ import requests
 import os
 from typing import Dict, List, Optional, Any
 from abc import ABC, abstractmethod
-from .ai_context import create_contextualized_prompt
+# from .ai_context import create_contextualized_prompt  # Temporarily disabled due to import hook issues
 from .config_manager import get_config_manager
 from .error_handler import get_error_handler, with_error_recovery, NetworkError, AIError
 

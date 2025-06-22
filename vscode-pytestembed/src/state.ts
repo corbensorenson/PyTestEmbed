@@ -22,6 +22,10 @@ export let state: ExtensionState = {
     dependencyServiceEnabled: false,
     dependencyServiceProcess: null,
 
+    // AI generation service state
+    aiGenerationServiceEnabled: false,
+    aiGenerationServiceProcess: null,
+
     // MCP server state
     mcpServerEnabled: false,
     mcpServerProcess: null,
@@ -39,6 +43,7 @@ export let state: ExtensionState = {
     testProgressStatusBar: null as any,
     liveTestServerStatusBar: null as any,
     dependencyServiceStatusBar: null as any,
+    aiGenerationServiceStatusBar: null as any,
     mcpServerStatusBar: null as any,
     serverStatusCheckInterval: undefined,
     documentChangeTimeout: undefined,

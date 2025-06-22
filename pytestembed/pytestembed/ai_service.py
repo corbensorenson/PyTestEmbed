@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from .ai_integration import AIManager
 from .ai_test_generator import AITestGenerator
 from .ai_doc_enhancer import AIDocumentationEnhancer
-from .smart_generator import SmartGenerator
+from .smart_generator import SmartCodeGenerator
 from .parser import PyTestEmbedParser
 
 
@@ -57,7 +57,7 @@ class AIService:
         self.parser = PyTestEmbedParser()
         self.test_generator = AITestGenerator(ai_provider="lmstudio")
         self.doc_enhancer = AIDocumentationEnhancer(ai_provider="lmstudio")
-        self.smart_generator = SmartGenerator(str(workspace_path))
+        self.smart_generator = SmartCodeGenerator()
         
         # Default AI provider preference
         self.default_provider = "lmstudio"  # User prefers LMStudio over Ollama

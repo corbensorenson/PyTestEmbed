@@ -5,6 +5,7 @@ Provides intelligent test and documentation generation with context-aware AI ana
 Supports right-click context menu integration and real-time code analysis.
 """
 
+import pytestembed  # Enable import hooks for proper test:/doc: block handling
 import ast
 import inspect
 import json

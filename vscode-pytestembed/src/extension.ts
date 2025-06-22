@@ -7,6 +7,7 @@ import { markAllTestsAsFailing, markAllTestsAsUntested, markAllTestsAsRunning } 
 import { stopMcpServer } from './mcpServer';
 import { registerHoverProvider } from './hoverProvider';
 import { createServerStatusIndicators } from './statusBar';
+import { registerCodeActionsProvider } from './codeActionsProvider';
 import { registerProviders } from './providers';
 import { registerFoldingProvider } from './folding';
 
@@ -128,6 +129,9 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Register hover provider for dependency tooltips
     registerHoverProvider(context);
+
+    // Register code actions provider for test: and doc: blocks
+    registerCodeActionsProvider(context);
 
     // Register folding provider for test: and doc: blocks
     registerFoldingProvider(context);

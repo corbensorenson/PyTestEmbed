@@ -222,7 +222,7 @@ doc:
     - Data filtering and manipulation
     - Memory management with reset functionality
 
-def cross_file_integration_test():
+def cross_file_integration_test(): 
     """Test integration with imported classes and functions"""
     # Test imported Derp class
     derp_instance = Derp()

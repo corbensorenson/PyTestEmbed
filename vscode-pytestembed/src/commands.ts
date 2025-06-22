@@ -8,7 +8,12 @@ import { state } from './state';
 import { startLiveTesting, stopLiveTesting, runIndividualTest } from './liveTesting';
 import { runTestAtCursor, showTestResultsPanel } from './testResults';
 import { startDependencyService, stopDependencyService } from './dependencyService';
+import { startAiGenerationService, stopAiGenerationService } from './aiGenerationService';
 import { startMcpServer, stopMcpServer } from './mcpServer';
+import {
+    rewriteTestBlock, addAnotherTest, generateEdgeCaseTests, improveTestCoverage,
+    rewriteDocBlock, addMoreDetail, addExamples, improveClarityDoc
+} from './codeActions';
 import { toggleBlockFolding, foldFunctionWithBlocks } from './folding';
 import { openPyTestEmbedPanel } from './panel';
 import { BlockType } from './types';
@@ -138,6 +143,19 @@ export function registerCommands(context: vscode.ExtensionContext) {
         })
     );
 
+    // AI generation service commands
+    context.subscriptions.push(
+        vscode.commands.registerCommand('pytestembed.startAiGenerationService', () => {
+            startAiGenerationService();
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('pytestembed.stopAiGenerationService', () => {
+            stopAiGenerationService();
+        })
+    );
+
     // MCP server commands
     context.subscriptions.push(
         vscode.commands.registerCommand('pytestembed.startMcpServer', () => {
@@ -162,12 +180,72 @@ export function registerCommands(context: vscode.ExtensionContext) {
     );
 
     context.subscriptions.push(
+        vscode.commands.registerCommand('pytestembed.toggleAiGenerationService', () => {
+            if (state.aiGenerationServiceEnabled) {
+                stopAiGenerationService();
+            } else {
+                startAiGenerationService();
+            }
+        })
+    );
+
+    context.subscriptions.push(
         vscode.commands.registerCommand('pytestembed.toggleMcpServer', () => {
             if (state.mcpServerEnabled) {
                 stopMcpServer();
             } else {
                 startMcpServer();
             }
+        })
+    );
+
+    // Code Actions for test: blocks
+    context.subscriptions.push(
+        vscode.commands.registerCommand('pytestembed.rewriteTestBlock', (filePath: string, lineNumber: number) => {
+            rewriteTestBlock(filePath, lineNumber);
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('pytestembed.addAnotherTest', (filePath: string, lineNumber: number) => {
+            addAnotherTest(filePath, lineNumber);
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('pytestembed.generateEdgeCaseTests', (filePath: string, lineNumber: number) => {
+            generateEdgeCaseTests(filePath, lineNumber);
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('pytestembed.improveTestCoverage', (filePath: string, lineNumber: number) => {
+            improveTestCoverage(filePath, lineNumber);
+        })
+    );
+
+    // Code Actions for doc: blocks
+    context.subscriptions.push(
+        vscode.commands.registerCommand('pytestembed.rewriteDocBlock', (filePath: string, lineNumber: number) => {
+            rewriteDocBlock(filePath, lineNumber);
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('pytestembed.addMoreDetail', (filePath: string, lineNumber: number) => {
+            addMoreDetail(filePath, lineNumber);
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('pytestembed.addExamples', (filePath: string, lineNumber: number) => {
+            addExamples(filePath, lineNumber);
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('pytestembed.improveClarityDoc', (filePath: string, lineNumber: number) => {
+            improveClarityDoc(filePath, lineNumber);
         })
     );
 

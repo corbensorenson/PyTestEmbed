@@ -5,6 +5,8 @@ Provides comprehensive context about PyTestEmbed syntax, patterns, and best prac
 to AI models for better code generation.
 """
 
+import pytestembed  # Enable import hooks for proper test:/doc: block handling
+import pytestembed
 PYTESTEMBED_SYSTEM_CONTEXT = """
 # PyTestEmbed System Context
 
@@ -20,10 +22,10 @@ PyTestEmbed allows developers to write tests and documentation right next to the
 def function_name(param1, param2):
     # Function implementation
     return result
-# test:
-#     function_name(1, 2) == 3: "Basic addition test",
-#     function_name(0, 0) == 0: "Zero case",
-#     function_name(-1, 1) == 0: "Negative number test"
+test:
+    function_name(1, 2) == 3: "Basic addition test",
+    function_name(0, 0) == 0: "Zero case",
+    function_name(-1, 1) == 0: "Negative number test"
 ```
 
 ### Basic Doc Block Syntax
@@ -33,7 +35,7 @@ def function_name(param1, param2):
     return result
 doc:
     Brief description of what the function does.
-    
+
     More detailed explanation including parameters,
     return values, and any important notes.
 ```
@@ -50,14 +52,14 @@ test:
     divide(7, 2) == 3.5: "Float result"
 doc:
     Divides two numbers with zero-check protection.
-    
+
     Args:
         x: Dividend (number to be divided)
         y: Divisor (number to divide by)
-    
+
     Returns:
         The quotient of x divided by y
-    
+
     Raises:
         ValueError: If y is zero
 ```
@@ -145,23 +147,23 @@ test:
 
 ### 1. Structure
 ```python
-doc:
-    Brief one-line description.
-    
-    Detailed explanation paragraph that covers:
-    - What the function does
-    - How it works (if complex)
-    - Important behavior notes
-    
-    Args:
-        param1: Description of first parameter
-        param2: Description of second parameter
-    
-    Returns:
-        Description of return value and type
-    
-    Raises:
-        ExceptionType: When this exception occurs
+# doc:
+#     Brief one-line description.
+#
+#     Detailed explanation paragraph that covers:
+#     - What the function does
+#     - How it works (if complex)
+#     - Important behavior notes
+#
+#     Args:
+#         param1: Description of first parameter
+#         param2: Description of second parameter
+#
+#     Returns:
+#         Description of return value and type
+#
+#     Raises:
+#         ExceptionType: When this exception occurs
 ```
 
 ### 2. Documentation Style

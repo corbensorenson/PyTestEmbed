@@ -10,18 +10,25 @@ import { state } from './state';
  */
 export function createServerStatusIndicators(context: vscode.ExtensionContext) {
     // Live Test Server status
-    state.liveTestServerStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 202);
+    state.liveTestServerStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 203);
     state.liveTestServerStatusBar.text = '$(debug-disconnect) Live';
     state.liveTestServerStatusBar.tooltip = 'PyTestEmbed Live Test Server Status';
     state.liveTestServerStatusBar.command = 'pytestembed.toggleLiveTesting';
     context.subscriptions.push(state.liveTestServerStatusBar);
 
     // Dependency Service status
-    state.dependencyServiceStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 201);
+    state.dependencyServiceStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 202);
     state.dependencyServiceStatusBar.text = '$(debug-disconnect) Deps';
     state.dependencyServiceStatusBar.tooltip = 'PyTestEmbed Dependency Service Status';
     state.dependencyServiceStatusBar.command = 'pytestembed.toggleDependencyService';
     context.subscriptions.push(state.dependencyServiceStatusBar);
+
+    // AI Generation Service status
+    state.aiGenerationServiceStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 201);
+    state.aiGenerationServiceStatusBar.text = '$(debug-disconnect) PyTmb AI';
+    state.aiGenerationServiceStatusBar.tooltip = 'PyTestEmbed AI Generation Service Status';
+    state.aiGenerationServiceStatusBar.command = 'pytestembed.toggleAiGenerationService';
+    context.subscriptions.push(state.aiGenerationServiceStatusBar);
 
     // MCP Server status
     state.mcpServerStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 200);
@@ -33,6 +40,7 @@ export function createServerStatusIndicators(context: vscode.ExtensionContext) {
     // Show status bars
     state.liveTestServerStatusBar.show();
     state.dependencyServiceStatusBar.show();
+    state.aiGenerationServiceStatusBar.show();
     state.mcpServerStatusBar.show();
 
     // Start periodic status checks
@@ -59,6 +67,9 @@ async function checkServerStatus() {
 
     // Check Dependency Service via WebSocket health check
     await checkWebSocketService('ws://localhost:8769', 'dependency_service', updateDependencyServiceStatus);
+
+    // Check AI Generation Service via WebSocket health check
+    await checkWebSocketService('ws://localhost:8771', 'ai_generation_service', updateAiGenerationServiceStatus);
 
     // Check MCP Server via HTTP (if it has HTTP endpoint)
     try {
@@ -90,8 +101,11 @@ async function checkWebSocketService(url: string, serviceName: string, updateCal
             }, 2000);
 
             ws.onopen = () => {
-                // Send health check command
-                ws.send(JSON.stringify({ command: 'health_check' }));
+                // Send lightweight health check command
+                ws.send(JSON.stringify({
+                    command: 'health_check',
+                    lightweight: true  // Flag to indicate this shouldn't trigger any processing
+                }));
             };
 
             ws.onmessage = (event) => {
@@ -128,6 +142,9 @@ async function checkWebSocketService(url: string, serviceName: string, updateCal
  * Update Live Test Server status indicator
  */
 function updateLiveTestServerStatus(connected: boolean) {
+    // Update state to match actual connection status
+    state.liveTestingEnabled = connected;
+
     if (connected) {
         state.liveTestServerStatusBar.text = '$(debug-alt) Live';
         state.liveTestServerStatusBar.backgroundColor = undefined;
@@ -143,6 +160,9 @@ function updateLiveTestServerStatus(connected: boolean) {
  * Update Dependency Service status indicator
  */
 function updateDependencyServiceStatus(connected: boolean) {
+    // Update state to match actual connection status
+    state.dependencyServiceEnabled = connected;
+
     if (connected) {
         state.dependencyServiceStatusBar.text = '$(debug-alt) Deps';
         state.dependencyServiceStatusBar.backgroundColor = undefined;
@@ -155,9 +175,30 @@ function updateDependencyServiceStatus(connected: boolean) {
 }
 
 /**
+ * Update AI Generation Service status indicator
+ */
+function updateAiGenerationServiceStatus(connected: boolean) {
+    // Update state to match actual connection status
+    state.aiGenerationServiceEnabled = connected;
+
+    if (connected) {
+        state.aiGenerationServiceStatusBar.text = '$(debug-alt) PyTmb AI';
+        state.aiGenerationServiceStatusBar.backgroundColor = undefined;
+        state.aiGenerationServiceStatusBar.tooltip = 'AI Generation Service: Connected - Lightbulb quick fixes available (Click to stop)';
+    } else {
+        state.aiGenerationServiceStatusBar.text = '$(debug-disconnect) PyTmb AI';
+        state.aiGenerationServiceStatusBar.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+        state.aiGenerationServiceStatusBar.tooltip = 'AI Generation Service: Disconnected - No AI-powered quick fixes (Click to start)';
+    }
+}
+
+/**
  * Update MCP Server status indicator
  */
 function updateMcpServerStatus(connected: boolean) {
+    // Update state to match actual connection status
+    state.mcpServerEnabled = connected;
+
     if (connected) {
         state.mcpServerStatusBar.text = '$(debug-alt) MCP';
         state.mcpServerStatusBar.backgroundColor = undefined;

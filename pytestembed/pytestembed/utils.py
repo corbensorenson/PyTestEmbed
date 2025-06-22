@@ -244,9 +244,37 @@ def _is_pytestembed_module(module_name: str) -> bool:
 
 
 def _has_pytestembed_syntax(content: str) -> bool:
-    """Check if content contains PyTestEmbed syntax."""
-    return re.search(r'^\s*test:\s*$', content, re.MULTILINE) is not None or \
-           re.search(r'^\s*doc:\s*$', content, re.MULTILINE) is not None
+    """Check if content contains PyTestEmbed syntax (excluding docstrings)."""
+    lines = content.split('\n')
+    in_docstring = False
+    docstring_delimiter = None
+
+    for line in lines:
+        stripped = line.strip()
+
+        # Check for docstring start/end
+        if '"""' in stripped or "'''" in stripped:
+            if not in_docstring:
+                # Starting a docstring
+                if stripped.count('"""') == 1:
+                    in_docstring = True
+                    docstring_delimiter = '"""'
+                elif stripped.count("'''") == 1:
+                    in_docstring = True
+                    docstring_delimiter = "'''"
+                # If count is 2, it's a single-line docstring, don't change state
+            else:
+                # Potentially ending a docstring
+                if docstring_delimiter in stripped:
+                    in_docstring = False
+                    docstring_delimiter = None
+
+        # Only check for test:/doc: if we're not in a docstring
+        if not in_docstring:
+            if re.match(r'^\s*test:\s*$', line) or re.match(r'^\s*doc:\s*$', line):
+                return True
+
+    return False
 
 
 # Legacy function for backward compatibility
