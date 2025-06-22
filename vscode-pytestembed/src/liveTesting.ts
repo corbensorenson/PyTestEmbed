@@ -15,124 +15,72 @@ import { updateTestStatus, markAllTestsAsFailing, markAllTestsAsUntested, markAl
  * Start live testing server and connect to it
  */
 export async function startLiveTesting() {
+    if (state.liveTestingEnabled) {
+        vscode.window.showInformationMessage('Live testing is already running');
+        return;
+    }
+
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
     if (!workspaceFolder) {
         vscode.window.showErrorMessage('No workspace folder found');
         return;
     }
 
-    state.outputChannel.appendLine('🔍 Checking server status...');
+    try {
+        // Start live test server process - Python will handle dependency service startup
+        const process = cp.spawn('python', [
+            '-m', 'pytestembed.live_runner',
+            workspaceFolder.uri.fsPath,
+            '8765'
+        ], {
+            cwd: workspaceFolder.uri.fsPath,
+            stdio: ['pipe', 'pipe', 'pipe']
+        });
 
-    // First, try to connect to existing servers
-    const liveTestConnected = await checkServerConnection('ws://localhost:8768', 'Live Test Server');
-    const dependencyConnected = await checkServerConnection('ws://localhost:8770', 'Dependency Service');
+        process.stdout?.on('data', (data) => {
+            const output = data.toString();
+            console.log('Live Test Server:', output);
+            state.outputChannel.appendLine(`[Live Test] ${output}`);
+        });
 
-    if (liveTestConnected && dependencyConnected) {
-        state.outputChannel.appendLine('✅ Both servers already running, connecting...');
-        connectToLiveTestServer();
-        return;
+        process.stderr?.on('data', (data) => {
+            const output = data.toString();
+            console.error('Live Test Server Error:', output);
+            state.outputChannel.appendLine(`[Live Test Error] ${output}`);
+        });
+
+        process.on('close', (code) => {
+            console.log(`Live test server exited with code ${code}`);
+            state.outputChannel.appendLine(`[Live Test] Process exited with code ${code}`);
+            state.liveTestingEnabled = false;
+            state.liveTestProcess = null;
+        });
+
+        process.on('error', (error) => {
+            console.error('Failed to start live test server:', error);
+            vscode.window.showErrorMessage(`Failed to start live test server: ${error.message}`);
+            state.liveTestingEnabled = false;
+            state.liveTestProcess = null;
+        });
+
+        state.liveTestProcess = process;
+        state.liveTestingEnabled = true;
+
+        vscode.window.showInformationMessage('Live test server started successfully');
+        state.outputChannel.appendLine('[Live Test] Started successfully');
+
+        // Wait a bit then connect
+        setTimeout(() => {
+            connectToLiveTestServer();
+        }, 3000);
+
+    } catch (error) {
+        console.error('Error starting live test server:', error);
+        vscode.window.showErrorMessage(`Error starting live test server: ${error}`);
     }
-
-    // Start missing servers
-    state.outputChannel.appendLine('🚀 Starting PyTestEmbed services...');
-
-    const config = vscode.workspace.getConfiguration('pytestembed');
-    const pythonInterpreter = config.get('pythonInterpreter', 'python');
-
-    // Start live test server if not running
-    if (!liveTestConnected) {
-        state.outputChannel.appendLine('🚀 Starting Live Test Server...');
-        startLiveTestServer(pythonInterpreter, workspaceFolder.uri.fsPath);
-    }
-
-    // Start dependency service if not running
-    if (!dependencyConnected) {
-        state.outputChannel.appendLine('🚀 Starting Dependency Service...');
-        startDependencyService(pythonInterpreter, workspaceFolder.uri.fsPath);
-    }
-
-    // Wait for servers to start, then connect
-    setTimeout(() => {
-        connectToLiveTestServer();
-    }, 3000);
 }
 
-/**
- * Check if a server is running by attempting to connect
- */
-async function checkServerConnection(url: string, serverName: string): Promise<boolean> {
-    return new Promise((resolve) => {
-        try {
-            const ws = new WebSocket(url);
-
-            const timeout = setTimeout(() => {
-                ws.close();
-                resolve(false);
-            }, 1000);
-
-            ws.on('open', () => {
-                clearTimeout(timeout);
-                ws.close();
-                state.outputChannel.appendLine(`✅ ${serverName} is already running`);
-                resolve(true);
-            });
-
-            ws.on('error', () => {
-                clearTimeout(timeout);
-                state.outputChannel.appendLine(`❌ ${serverName} is not running`);
-                resolve(false);
-            });
-        } catch (error) {
-            resolve(false);
-        }
-    });
-}
-
-/**
- * Start the live test server process
- */
-function startLiveTestServer(pythonInterpreter: string, workspacePath: string) {
-    const liveTestProcess = cp.spawn(pythonInterpreter, ['-m', 'pytestembed.live_runner', workspacePath, '8768'], {
-        cwd: workspacePath,
-        shell: true,
-        detached: true
-    });
-
-    liveTestProcess.stdout?.on('data', (data) => {
-        state.outputChannel.append(`[Live Test] ${data.toString()}`);
-    });
-
-    liveTestProcess.stderr?.on('data', (data) => {
-        state.outputChannel.append(`[Live Test Error] ${data.toString()}`);
-    });
-
-    liveTestProcess.on('close', (code) => {
-        state.outputChannel.appendLine(`Live test server exited with code ${code}`);
-    });
-}
-
-/**
- * Start the dependency service process
- */
-function startDependencyService(pythonInterpreter: string, workspacePath: string) {
-    const dependencyProcess = cp.spawn(pythonInterpreter, ['-m', 'pytestembed.dependency_service', workspacePath, '8770'], {
-        cwd: workspacePath,
-        shell: true,
-        detached: true
-    });
-
-    dependencyProcess.stdout?.on('data', (data) => {
-        state.outputChannel.append(`[Dependency] ${data.toString()}`);
-    });
-
-    dependencyProcess.stderr?.on('data', (data) => {
-        state.outputChannel.append(`[Dependency Error] ${data.toString()}`);
-    });
-
-    dependencyProcess.on('close', (code) => {
-        state.outputChannel.appendLine(`Dependency service exited with code ${code}`);
-    });
-}
+// Removed server checking and startup functions - Python handles service dependencies
 
 /**
  * Stop live testing
@@ -173,7 +121,7 @@ export function stopLiveTesting() {
  */
 function connectToLiveTestServer() {
     try {
-        state.liveTestSocket = new WebSocket('ws://localhost:8768');
+        state.liveTestSocket = new WebSocket('ws://localhost:8765');
 
         state.liveTestSocket.on('open', () => {
             state.outputChannel.appendLine('✅ Connected to live test server');

@@ -404,11 +404,34 @@ def dependency_service(port, workspace, file_watcher_port):
 
 
 @cli.command()
+@click.option('--port', default=8771, help='Port for AI service')
+@click.option('--workspace', default='.', help='Workspace directory')
+@click.option('--provider', default='lmstudio', type=click.Choice(['lmstudio', 'ollama']), help='Default AI provider')
+def ai_service(port, workspace, provider):
+    """Start AI service for test and documentation generation."""
+    import asyncio
+    from .ai_service import AIService
+
+    click.echo(f"🤖 Starting AI Service on port {port}")
+    click.echo(f"📁 Workspace: {workspace}")
+    click.echo(f"🧠 Default AI provider: {provider}")
+    click.echo("Press Ctrl+C to stop")
+
+    try:
+        service = AIService(workspace, port)
+        service.default_provider = provider
+        asyncio.run(service.start_server())
+    except KeyboardInterrupt:
+        click.echo("\n👋 AI service stopped")
+
+
+@cli.command()
 @click.option('--workspace', default='.', help='Workspace directory')
 @click.option('--live-port', default=8765, help='Port for live test server')
 @click.option('--file-watcher-port', default=8767, help='Port for file watcher service')
 @click.option('--dependency-port', default=8769, help='Port for dependency service')
-def start_all(workspace, live_port, file_watcher_port, dependency_port):
+@click.option('--ai-port', default=8771, help='Port for AI service')
+def start_all(workspace, live_port, file_watcher_port, dependency_port, ai_port):
     """Start all PyTestEmbed services (file watcher, dependency service, and live test server)."""
     import asyncio
     import subprocess
@@ -437,6 +460,15 @@ def start_all(workspace, live_port, file_watcher_port, dependency_port):
             workspace, str(dependency_port)
         ])
         processes.append(('Dependency Service', dependency_proc))
+        time.sleep(2)  # Give it time to start
+
+        # Start AI service
+        click.echo(f"🤖 Starting AI Service on port {ai_port}")
+        ai_proc = subprocess.Popen([
+            sys.executable, '-m', 'pytestembed.ai_service',
+            workspace
+        ])
+        processes.append(('AI Service', ai_proc))
         time.sleep(2)  # Give it time to start
 
         # Start live test server

@@ -75,6 +75,9 @@ class LiveTestRunner:
         self.dependency_service_ws = None
         self._loop = None
 
+        # Dependency service process (will be started if needed)
+        self.dependency_service_process = None
+
         # Advanced testing features (but no dependency graph - that's handled by dependency service)
         self.smart_selector = SmartTestSelector(str(workspace_path))
         self.failure_predictor = FailurePredictor(str(workspace_path))
@@ -96,6 +99,42 @@ class LiveTestRunner:
 
         # Start garbage collection
         self._start_garbage_collection()
+
+    async def ensure_dependency_service_running(self):
+        """Ensure dependency service is running, start it if needed."""
+        try:
+            # Try to connect to existing dependency service
+            test_ws = await websockets.connect(f"ws://localhost:{self.dependency_service_port}")
+            await test_ws.close()
+            print(f"✅ Dependency service already running on port {self.dependency_service_port}")
+            return True
+        except Exception:
+            print(f"🔗 Starting dependency service on port {self.dependency_service_port}")
+
+            # Start dependency service process
+            import subprocess
+            try:
+                self.dependency_service_process = subprocess.Popen([
+                    'python', '-m', 'pytestembed.dependency_service',
+                    str(self.workspace_path), str(self.dependency_service_port)
+                ], cwd=str(self.workspace_path))
+
+                # Wait a bit for it to start
+                await asyncio.sleep(2)
+
+                # Verify it started
+                try:
+                    test_ws = await websockets.connect(f"ws://localhost:{self.dependency_service_port}")
+                    await test_ws.close()
+                    print(f"✅ Dependency service started successfully")
+                    return True
+                except Exception as e:
+                    print(f"❌ Failed to verify dependency service startup: {e}")
+                    return False
+
+            except Exception as e:
+                print(f"❌ Failed to start dependency service: {e}")
+                return False
 
     async def connect_to_file_watcher(self):
         """Connect to the file watcher service."""
@@ -426,7 +465,10 @@ class LiveTestRunner:
                     'type': 'graph_exported',
                     'output_path': output_path
                 }))
-                
+
+            elif command == 'health_check':
+                await self.handle_health_check(websocket)
+
         except json.JSONDecodeError:
             await websocket.send(json.dumps({
                 'type': 'error',
@@ -2908,6 +2950,9 @@ except Exception as e:
         # Store the event loop for service connections
         self._loop = asyncio.get_running_loop()
 
+        # Ensure dependency service is running (live test depends on it)
+        await self.ensure_dependency_service_running()
+
         # Connect to file watcher service
         await self.connect_to_file_watcher()
 
@@ -3061,6 +3106,20 @@ class LiveTestClient:
         """Disconnect from the server."""
         if self.websocket:
             await self.websocket.close()
+
+    async def handle_health_check(self, websocket):
+        """Handle health check request - lightweight status check."""
+        try:
+            await websocket.send(json.dumps({
+                'type': 'health_check',
+                'status': 'healthy',
+                'service': 'live_test_runner',
+                'cached_results': len(self.test_cache.cache),
+                'connected_clients': len(self.clients),
+                'timestamp': time.time()
+            }))
+        except Exception as e:
+            print(f"⚠️ Error in health check: {e}")
 
 
 # CLI command for starting live server

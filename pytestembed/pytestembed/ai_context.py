@@ -20,10 +20,10 @@ PyTestEmbed allows developers to write tests and documentation right next to the
 def function_name(param1, param2):
     # Function implementation
     return result
-test:
-    function_name(1, 2) == 3: "Basic addition test",
-    function_name(0, 0) == 0: "Zero case",
-    function_name(-1, 1) == 0: "Negative number test"
+# test:
+#     function_name(1, 2) == 3: "Basic addition test",
+#     function_name(0, 0) == 0: "Zero case",
+#     function_name(-1, 1) == 0: "Negative number test"
 ```
 
 ### Basic Doc Block Syntax

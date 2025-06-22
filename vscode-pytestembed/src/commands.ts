@@ -7,6 +7,7 @@ import * as path from 'path';
 import { state } from './state';
 import { startLiveTesting, stopLiveTesting, runIndividualTest } from './liveTesting';
 import { runTestAtCursor, showTestResultsPanel } from './testResults';
+import { startDependencyService, stopDependencyService } from './dependencyService';
 import { startMcpServer, stopMcpServer } from './mcpServer';
 import { toggleBlockFolding, foldFunctionWithBlocks } from './folding';
 import { openPyTestEmbedPanel } from './panel';
@@ -124,6 +125,19 @@ export function registerCommands(context: vscode.ExtensionContext) {
         })
     );
 
+    // Dependency service commands
+    context.subscriptions.push(
+        vscode.commands.registerCommand('pytestembed.startDependencyService', () => {
+            startDependencyService();
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('pytestembed.stopDependencyService', () => {
+            stopDependencyService();
+        })
+    );
+
     // MCP server commands
     context.subscriptions.push(
         vscode.commands.registerCommand('pytestembed.startMcpServer', () => {
@@ -134,6 +148,16 @@ export function registerCommands(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.commands.registerCommand('pytestembed.stopMcpServer', () => {
             stopMcpServer();
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('pytestembed.toggleDependencyService', () => {
+            if (state.dependencyServiceEnabled) {
+                stopDependencyService();
+            } else {
+                startDependencyService();
+            }
         })
     );
 
@@ -409,11 +433,72 @@ function runPythonWithoutBlocks() {
 }
 
 /**
- * Generate smart blocks
+ * Generate smart blocks using Python AI service
  */
-function generateSmartBlocks(type: BlockType) {
-    vscode.window.showInformationMessage(`Generating ${type} blocks...`);
-    // Implementation would call AI generation service
+async function generateSmartBlocks(type: BlockType) {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+        vscode.window.showErrorMessage('No active editor');
+        return;
+    }
+
+    const document = editor.document;
+    const position = editor.selection.active;
+    const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
+
+    if (!workspaceFolder) {
+        vscode.window.showErrorMessage('File must be in a workspace');
+        return;
+    }
+
+    const relativePath = require('path').relative(workspaceFolder.uri.fsPath, document.fileName);
+
+    try {
+        // Connect to AI service
+        const WebSocket = require('ws');
+        const ws = new WebSocket('ws://localhost:8771');
+
+        ws.on('open', () => {
+            const command = type === 'test' ? 'generate_test_block' :
+                           type === 'doc' ? 'generate_doc_block' : 'generate_both_blocks';
+
+            const request = {
+                command: command,
+                file_path: relativePath,
+                line_number: position.line + 1  // Convert to 1-based
+            };
+
+            ws.send(JSON.stringify(request));
+            vscode.window.showInformationMessage(`🤖 Generating ${type} blocks using AI...`);
+        });
+
+        ws.on('message', (data: string) => {
+            const response = JSON.parse(data);
+
+            if (response.success) {
+                // Insert the generated content
+                const insertPosition = new vscode.Position(position.line + 1, 0);
+                editor.edit(editBuilder => {
+                    editBuilder.insert(insertPosition, response.content + '\n');
+                });
+
+                const provider = response.provider_used || 'AI';
+                const fallbackMsg = response.fallback_used ? ' (fallback)' : '';
+                vscode.window.showInformationMessage(`✅ ${type} blocks generated using ${provider}${fallbackMsg}`);
+            } else {
+                vscode.window.showErrorMessage(`❌ Failed to generate ${type} blocks: ${response.error}`);
+            }
+
+            ws.close();
+        });
+
+        ws.on('error', (error: any) => {
+            vscode.window.showErrorMessage(`❌ AI service connection failed: ${error.message}`);
+        });
+
+    } catch (error) {
+        vscode.window.showErrorMessage(`❌ Error connecting to AI service: ${error}`);
+    }
 }
 
 /**
@@ -583,7 +668,11 @@ async function navigateToElement(args: any) {
             return;
         }
 
-        console.log(`🔗 Parsed: file_path=${file_path}, line_number=${line_number}`);
+        console.log(`🔗 Parsed: file_path=${file_path}, line_number=${line_number} (type: ${typeof line_number})`);
+
+        // Ensure line_number is a number
+        const lineNum = typeof line_number === 'string' ? parseInt(line_number, 10) : line_number;
+        console.log(`🔗 Converted line number: ${lineNum}`);
 
         // Find the workspace folder
         const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
@@ -592,8 +681,31 @@ async function navigateToElement(args: any) {
             return;
         }
 
-        // Construct the full file path
-        const fullPath = path.join(workspaceFolder.uri.fsPath, file_path);
+        // Construct the full file path - handle both relative and absolute paths
+        let fullPath: string;
+        if (path.isAbsolute(file_path)) {
+            fullPath = file_path;
+        } else {
+            // Try the file path as-is first
+            fullPath = path.join(workspaceFolder.uri.fsPath, file_path);
+
+            // If that doesn't exist, try looking in common directories
+            if (!require('fs').existsSync(fullPath)) {
+                const possiblePaths = [
+                    path.join(workspaceFolder.uri.fsPath, 'testProject', file_path),
+                    path.join(workspaceFolder.uri.fsPath, 'src', file_path),
+                    path.join(workspaceFolder.uri.fsPath, file_path)
+                ];
+
+                for (const possiblePath of possiblePaths) {
+                    if (require('fs').existsSync(possiblePath)) {
+                        fullPath = possiblePath;
+                        break;
+                    }
+                }
+            }
+        }
+
         const fileUri = vscode.Uri.file(fullPath);
 
         try {
@@ -602,12 +714,14 @@ async function navigateToElement(args: any) {
             const editor = await vscode.window.showTextDocument(document);
 
             // Navigate to the specific line
-            const position = new vscode.Position(line_number - 1, 0); // Convert to 0-based
+            const position = new vscode.Position(lineNum - 1, 0); // Convert to 0-based
+            console.log(`🔗 Navigating to position: line ${lineNum - 1} (0-based), column 0`);
             editor.selection = new vscode.Selection(position, position);
             editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
 
         } catch (error) {
-            vscode.window.showErrorMessage(`Could not open file: ${file_path}`);
+            console.error(`Navigation error for ${file_path}:`, error);
+            vscode.window.showErrorMessage(`Could not open file: ${file_path} (tried: ${fullPath})`);
         }
 
     } catch (error) {
@@ -637,7 +751,11 @@ async function navigateToElementSplit(args: any) {
             return;
         }
 
-        console.log('🔗📱 Navigating to split view:', file_path, 'line:', line_number);
+        console.log('🔗📱 Navigating to split view:', file_path, 'line:', line_number, '(type:', typeof line_number, ')');
+
+        // Ensure line_number is a number
+        const lineNum = typeof line_number === 'string' ? parseInt(line_number, 10) : line_number;
+        console.log(`🔗📱 Converted line number: ${lineNum}`);
 
         // Find the workspace folder
         const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
@@ -646,8 +764,31 @@ async function navigateToElementSplit(args: any) {
             return;
         }
 
-        // Construct the full file path
-        const fullPath = path.join(workspaceFolder.uri.fsPath, file_path);
+        // Construct the full file path - handle both relative and absolute paths
+        let fullPath: string;
+        if (path.isAbsolute(file_path)) {
+            fullPath = file_path;
+        } else {
+            // Try the file path as-is first
+            fullPath = path.join(workspaceFolder.uri.fsPath, file_path);
+
+            // If that doesn't exist, try looking in common directories
+            if (!require('fs').existsSync(fullPath)) {
+                const possiblePaths = [
+                    path.join(workspaceFolder.uri.fsPath, 'testProject', file_path),
+                    path.join(workspaceFolder.uri.fsPath, 'src', file_path),
+                    path.join(workspaceFolder.uri.fsPath, file_path)
+                ];
+
+                for (const possiblePath of possiblePaths) {
+                    if (require('fs').existsSync(possiblePath)) {
+                        fullPath = possiblePath;
+                        break;
+                    }
+                }
+            }
+        }
+
         const fileUri = vscode.Uri.file(fullPath);
 
         try {
@@ -656,12 +797,14 @@ async function navigateToElementSplit(args: any) {
             const editor = await vscode.window.showTextDocument(document, vscode.ViewColumn.Beside);
 
             // Navigate to the specific line
-            const position = new vscode.Position(line_number - 1, 0); // Convert to 0-based
+            const position = new vscode.Position(lineNum - 1, 0); // Convert to 0-based
+            console.log(`🔗📱 Navigating to position: line ${lineNum - 1} (0-based), column 0`);
             editor.selection = new vscode.Selection(position, position);
             editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
 
         } catch (error) {
-            vscode.window.showErrorMessage(`Could not open file in split view: ${file_path}`);
+            console.error(`Split view navigation error for ${file_path}:`, error);
+            vscode.window.showErrorMessage(`Could not open file in split view: ${file_path} (tried: ${fullPath})`);
         }
 
     } catch (error) {

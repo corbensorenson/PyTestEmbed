@@ -25,7 +25,11 @@ export interface ExtensionState {
     liveTestingEnabled: boolean;
     liveTestSocket: WebSocket | null;
     liveTestProcess: cp.ChildProcess | null;
-    
+
+    // Dependency service state
+    dependencyServiceEnabled: boolean;
+    dependencyServiceProcess: cp.ChildProcess | null;
+
     // MCP server state
     mcpServerEnabled: boolean;
     mcpServerProcess: cp.ChildProcess | null;
@@ -42,6 +46,7 @@ export interface ExtensionState {
     diagnosticCollection: vscode.DiagnosticCollection;
     testProgressStatusBar: vscode.StatusBarItem;
     liveTestServerStatusBar: vscode.StatusBarItem;
+    dependencyServiceStatusBar: vscode.StatusBarItem;
     mcpServerStatusBar: vscode.StatusBarItem;
     serverStatusCheckInterval: NodeJS.Timeout | undefined;
     documentChangeTimeout: NodeJS.Timeout | undefined;

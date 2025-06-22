@@ -360,8 +360,19 @@ class CodeDependencyGraph:
             with open(full_path, 'r', encoding='utf-8') as f:
                 content = f.read()
 
-            # Get module name from target file (remove .py extension)
-            target_module = target_file.replace('.py', '').replace('/', '.')
+            # Generate multiple possible module names for the target file
+            target_module_full = target_file.replace('.py', '').replace('/', '.')
+            target_module_name = Path(target_file).stem  # Just the filename without extension
+
+            # For testProject/derp.py, this gives us:
+            # target_module_full = "testProject.derp"
+            # target_module_name = "derp"
+
+            possible_modules = [
+                target_module_full,      # testProject.derp
+                target_module_name,      # derp
+                target_file.replace('.py', ''),  # testProject/derp
+            ]
 
             lines = content.split('\n')
             for line in lines:
@@ -374,22 +385,34 @@ class CodeDependencyGraph:
                         module_part = parts[0].replace('from ', '').strip()
                         import_part = parts[1].strip()
 
-                        # Check if importing from the target module
-                        if module_part == target_module or module_part.endswith(target_module):
+                        # Check if importing from any of the possible target modules
+                        module_matches = any(
+                            module_part == possible_module or
+                            module_part.endswith(possible_module) or
+                            possible_module.endswith(module_part)
+                            for possible_module in possible_modules
+                        )
+
+                        if module_matches:
                             # Check if importing the specific element
                             imports = [imp.strip() for imp in import_part.split(',')]
                             for imp in imports:
                                 clean_import = imp.split(' as ')[0].strip()
                                 if clean_import == element_name:
+                                    print(f"✅ Found import: {line} -> {element_name}")
                                     return True
 
                 # Check for "import module" then usage as "module.element"
-                if line.startswith('import ') and target_module in line:
-                    # Check if the element is used as module.element in the file
-                    module_name = target_module.split('.')[-1]  # Get last part of module path
-                    if f"{module_name}.{element_name}" in content:
-                        return True
+                for possible_module in possible_modules:
+                    if line.startswith('import ') and possible_module in line:
+                        # Check if the element is used as module.element in the file
+                        module_name = possible_module.split('.')[-1]  # Get last part of module path
+                        if f"{module_name}.{element_name}" in content:
+                            print(f"✅ Found module import and usage: {line} -> {module_name}.{element_name}")
+                            return True
 
+            print(f"❌ No import found for {element_name} from {target_file} in {calling_file}")
+            print(f"   Checked modules: {possible_modules}")
             return False
 
         except Exception as e:

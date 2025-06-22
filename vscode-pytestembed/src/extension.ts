@@ -123,8 +123,8 @@ export function activate(context: vscode.ExtensionContext) {
     // Create server status indicators
     createServerStatusIndicators(context);
 
-    // Register providers (disabled - using new hover provider instead)
-    // registerProviders(context);
+    // Register providers (quick fix lightbulb for AI generation)
+    registerProviders(context);
 
     // Register hover provider for dependency tooltips
     registerHoverProvider(context);

@@ -25,13 +25,18 @@ from .config_manager import ConfigManager
 class PyTestEmbedMCPServer:
     """MCP Server for PyTestEmbed integration with agentic coding tools."""
     
-    def __init__(self, workspace_path: str = ".", live_test_port: int = 8765):
+    def __init__(self, workspace_path: str = ".", live_test_port: int = 8765, dependency_service_port: int = 8769):
         self.workspace_path = Path(workspace_path).resolve()
         self.live_test_port = live_test_port
+        self.dependency_service_port = dependency_service_port
         self.live_test_client = None
         self.parser = PyTestEmbedParser()
         self.config_manager = ConfigManager()
         self.smart_generator = SmartCodeGenerator()
+
+        # Service processes (for auto-starting dependencies)
+        self.live_test_process = None
+        self.dependency_service_process = None
         
         # MCP protocol handlers
         self.tools = {
@@ -68,8 +73,23 @@ class PyTestEmbedMCPServer:
     async def start(self, port: int = 3001):
         """Start the MCP server."""
         print(f"🚀 Starting PyTestEmbed MCP Server on port {port}")
-        
-        # Try to connect to live test server
+
+        # Ensure all required services are running
+        print("🔧 Ensuring all PyTestEmbed services are running...")
+
+        # Start dependency service first (live test depends on it)
+        if not await self.ensure_dependency_service_running():
+            print("❌ Failed to start dependency service")
+            return
+
+        # Start live test service (depends on dependency service)
+        if not await self.ensure_live_test_service_running():
+            print("❌ Failed to start live test service")
+            return
+
+        print("✅ All PyTestEmbed services are running")
+
+        # Connect to live test server
         await self._connect_to_live_test_server()
         
         # Start MCP server
@@ -95,7 +115,77 @@ class PyTestEmbedMCPServer:
         finally:
             if self.live_test_client:
                 await self.live_test_client.disconnect()
-    
+
+    async def ensure_dependency_service_running(self):
+        """Ensure dependency service is running, start it if needed."""
+        try:
+            # Try to connect to existing dependency service
+            test_ws = await websockets.connect(f"ws://localhost:{self.dependency_service_port}")
+            await test_ws.close()
+            print(f"✅ Dependency service already running on port {self.dependency_service_port}")
+            return True
+        except Exception:
+            print(f"🔗 Starting dependency service on port {self.dependency_service_port}")
+
+            try:
+                import subprocess
+                self.dependency_service_process = subprocess.Popen([
+                    'python', '-m', 'pytestembed.dependency_service',
+                    str(self.workspace_path), str(self.dependency_service_port)
+                ], cwd=str(self.workspace_path))
+
+                # Wait for it to start
+                await asyncio.sleep(3)
+
+                # Verify it started
+                try:
+                    test_ws = await websockets.connect(f"ws://localhost:{self.dependency_service_port}")
+                    await test_ws.close()
+                    print(f"✅ Dependency service started successfully")
+                    return True
+                except Exception as e:
+                    print(f"❌ Failed to verify dependency service startup: {e}")
+                    return False
+
+            except Exception as e:
+                print(f"❌ Failed to start dependency service: {e}")
+                return False
+
+    async def ensure_live_test_service_running(self):
+        """Ensure live test service is running, start it if needed."""
+        try:
+            # Try to connect to existing live test service
+            test_ws = await websockets.connect(f"ws://localhost:{self.live_test_port}")
+            await test_ws.close()
+            print(f"✅ Live test service already running on port {self.live_test_port}")
+            return True
+        except Exception:
+            print(f"🔗 Starting live test service on port {self.live_test_port}")
+
+            try:
+                import subprocess
+                self.live_test_process = subprocess.Popen([
+                    'python', '-m', 'pytestembed.live_runner',
+                    str(self.workspace_path), str(self.live_test_port)
+                ], cwd=str(self.workspace_path))
+
+                # Wait for it to start
+                await asyncio.sleep(5)
+
+                # Verify it started
+                try:
+                    test_ws = await websockets.connect(f"ws://localhost:{self.live_test_port}")
+                    await test_ws.close()
+                    print(f"✅ Live test service started successfully")
+                    return True
+                except Exception as e:
+                    print(f"❌ Failed to verify live test service startup: {e}")
+                    return False
+
+            except Exception as e:
+                print(f"❌ Failed to start live test service: {e}")
+                return False
+
     async def _connect_to_live_test_server(self):
         """Connect to the live test server."""
         try:

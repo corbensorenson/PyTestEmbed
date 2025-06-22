@@ -10,10 +10,11 @@ import asyncio
 import websockets
 import json
 import os
+import time
 from pathlib import Path
 from typing import Dict, List, Optional
 from .dependency_graph import CodeDependencyGraph
-from .file_watcher import FileWatcherService, FileChangeEvent
+from .file_watcher_service import FileWatcherService, FileChangeEvent
 
 
 class DependencyService:
@@ -25,9 +26,8 @@ class DependencyService:
         self.dependency_graph = CodeDependencyGraph(workspace_path)
         self.clients = set()
 
-        # Modular file watcher service
-        self.file_watcher = FileWatcherService(workspace_path)
-        self.file_watcher.subscribe('file_changed', self.on_file_changed)
+        # File watcher will be added later - for now focus on dynamic discovery
+        self.file_watcher = None
         
     async def start(self):
         """Start the dependency service."""
@@ -36,11 +36,8 @@ class DependencyService:
         # Store the event loop for file watcher
         self._loop = asyncio.get_running_loop()
 
-        # Build initial dependency graph
-        self.dependency_graph.build_graph()
-
-        # Start modular file watcher
-        self.file_watcher.start_watching(self._loop)
+        # Perform dynamic project discovery and build dependency graph
+        await self.discover_and_build_graph()
 
         # Start WebSocket server
         try:
@@ -48,7 +45,94 @@ class DependencyService:
                 print(f"✅ Dependency Service running at ws://localhost:{self.port}")
                 await asyncio.Future()  # Run forever
         finally:
-            self.file_watcher.stop_watching()
+            pass  # File watcher cleanup will be added later
+
+    async def discover_and_build_graph(self):
+        """Dynamically discover project structure and build dependency graph."""
+        print(f"🔍 Discovering project structure in {self.workspace_path}")
+
+        # Find all Python files in the workspace (respecting .pytestembedignore)
+        python_files = self._discover_python_files()
+
+        print(f"📁 Found {len(python_files)} Python files:")
+        for file_path in python_files[:10]:  # Show first 10
+            print(f"   📄 {file_path}")
+        if len(python_files) > 10:
+            print(f"   ... and {len(python_files) - 10} more files")
+
+        # Build dependency graph with discovered files
+        self.dependency_graph.build_graph()
+
+        print(f"✅ Dependency graph built with {len(self.dependency_graph.elements)} elements")
+
+    def _discover_python_files(self) -> List[str]:
+        """Discover all Python files in the workspace, respecting .pytestembedignore."""
+        python_files = []
+        ignore_patterns = self._load_ignore_patterns()
+
+        # Walk through all directories
+        for root, dirs, files in os.walk(self.workspace_path):
+            # Filter out ignored directories
+            dirs[:] = [d for d in dirs if not self._should_ignore(os.path.join(root, d), ignore_patterns)]
+
+            for file in files:
+                if file.endswith('.py'):
+                    file_path = os.path.join(root, file)
+                    relative_path = os.path.relpath(file_path, self.workspace_path)
+
+                    # Check if file should be ignored
+                    if not self._should_ignore(file_path, ignore_patterns):
+                        python_files.append(relative_path)
+
+        return python_files
+
+    def _load_ignore_patterns(self) -> List[str]:
+        """Load ignore patterns from .pytestembedignore file."""
+        ignore_file = self.workspace_path / '.pytestembedignore'
+        patterns = [
+            # Default ignore patterns
+            '__pycache__',
+            '*.pyc',
+            '.git',
+            '.vscode',
+            '.idea',
+            'node_modules',
+            '.pytest_cache',
+            'venv',
+            'env',
+            '.env'
+        ]
+
+        if ignore_file.exists():
+            try:
+                with open(ignore_file, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith('#'):
+                            patterns.append(line)
+                print(f"📋 Loaded {len(patterns)} ignore patterns from .pytestembedignore")
+            except Exception as e:
+                print(f"⚠️ Error reading .pytestembedignore: {e}")
+        else:
+            print(f"📋 Using default ignore patterns (no .pytestembedignore found)")
+
+        return patterns
+
+    def _should_ignore(self, file_path: str, patterns: List[str]) -> bool:
+        """Check if a file/directory should be ignored based on patterns."""
+        import fnmatch
+
+        # Convert to relative path for pattern matching
+        try:
+            relative_path = os.path.relpath(file_path, self.workspace_path)
+        except ValueError:
+            relative_path = file_path
+
+        for pattern in patterns:
+            if fnmatch.fnmatch(relative_path, pattern) or fnmatch.fnmatch(os.path.basename(file_path), pattern):
+                return True
+
+        return False
     
     async def handle_client(self, websocket, path):
         """Handle a client connection."""
@@ -111,6 +195,8 @@ class DependencyService:
                 data.get('file_path'),
                 data.get('element_name')
             )
+        elif command == 'health_check':
+            await self.handle_health_check(websocket)
         else:
             await self.send_error(websocket, f"Unknown command: {command}")
 
@@ -120,23 +206,69 @@ class DependencyService:
         print(f"🔗 Dependency service detected file change: {changed_file}")
 
         try:
-            # Update dependency graph for the changed file
-            full_path = str(self.workspace_path / changed_file)
-            self.dependency_graph.update_file_dependencies(full_path)
+            # Check if this is a structural change that requires full rebuild
+            if self._is_structural_change(changed_file, event):
+                print(f"🔄 Structural change detected, rebuilding dependency graph...")
+                await self.discover_and_build_graph()
 
-            # Broadcast dependency graph update to connected clients
-            await self.broadcast({
-                'type': 'dependency_graph_updated',
-                'data': {
-                    'changed_file': changed_file,
-                    'timestamp': asyncio.get_event_loop().time()
-                }
-            })
+                # Broadcast full graph rebuild to connected clients
+                await self.broadcast({
+                    'type': 'dependency_graph_rebuilt',
+                    'data': {
+                        'trigger_file': changed_file,
+                        'reason': 'structural_change',
+                        'timestamp': asyncio.get_event_loop().time()
+                    }
+                })
+            else:
+                # Update dependency graph for the changed file only
+                full_path = str(self.workspace_path / changed_file)
+                self.dependency_graph.update_file_dependencies(full_path)
+
+                # Broadcast incremental update to connected clients
+                await self.broadcast({
+                    'type': 'dependency_graph_updated',
+                    'data': {
+                        'changed_file': changed_file,
+                        'timestamp': asyncio.get_event_loop().time()
+                    }
+                })
 
             print(f"✅ Dependency graph updated for {changed_file}")
 
         except Exception as e:
             print(f"⚠️ Error updating dependencies for {changed_file}: {e}")
+            # On error, try full rebuild as fallback
+            try:
+                print(f"🔄 Attempting full rebuild as fallback...")
+                await self.discover_and_build_graph()
+            except Exception as rebuild_error:
+                print(f"❌ Full rebuild failed: {rebuild_error}")
+
+    def _is_structural_change(self, changed_file: str, event: FileChangeEvent) -> bool:
+        """Determine if a file change represents a structural change requiring full rebuild."""
+        # File creation/deletion is always structural
+        if event.event_type in ['created', 'deleted']:
+            return True
+
+        # Check if the file was previously unknown to the dependency graph
+        relative_path = self._get_relative_path(changed_file)
+        file_elements = [
+            element_id for element_id, element in self.dependency_graph.elements.items()
+            if element.file_path == changed_file or element.file_path == relative_path
+        ]
+
+        # If no elements found for this file, it might be a new file or moved file
+        if not file_elements:
+            print(f"🔍 File {changed_file} not found in dependency graph, treating as structural change")
+            return True
+
+        # TODO: Could add more sophisticated detection here:
+        # - Check if imports changed significantly
+        # - Check if class/function definitions were added/removed
+        # - Check if file was moved (different path but same content)
+
+        return False
 
     async def broadcast(self, message: dict):
         """Broadcast a message to all connected clients."""
@@ -219,12 +351,17 @@ class DependencyService:
                             'element_type': dep_element.element_type
                         })
             
+            # Get the actual element to return its real line number
+            found_element = self.dependency_graph.elements.get(element_id)
+            actual_line_number = found_element.line_number if found_element else line_number
+            actual_file_path = found_element.file_path if found_element else file_path
+
             response = {
                 'type': 'dependency_info',
                 'element_id': element_id,
                 'element_name': element_name,
-                'file_path': file_path,
-                'line_number': line_number,
+                'file_path': actual_file_path,
+                'line_number': actual_line_number,
                 'dependencies': dependencies,
                 'dependents': dependents,
                 'enhanced_dependencies': enhanced_dependencies,
@@ -533,6 +670,20 @@ class DependencyService:
         except Exception as e:
             print(f"⚠️ Error getting dependents for {element_name}: {e}")
             await self.send_error(websocket, str(e))
+
+    async def handle_health_check(self, websocket):
+        """Handle health check request - lightweight status check."""
+        try:
+            await websocket.send(json.dumps({
+                'type': 'health_check',
+                'status': 'healthy',
+                'service': 'dependency_service',
+                'elements_count': len(self.dependency_graph.elements),
+                'dependencies_count': len(self.dependency_graph.edges),
+                'timestamp': time.time()
+            }))
+        except Exception as e:
+            print(f"⚠️ Error in health check: {e}")
 
 
 async def main():

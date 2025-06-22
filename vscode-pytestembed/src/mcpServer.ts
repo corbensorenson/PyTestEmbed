@@ -5,6 +5,8 @@
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
 import { state, addPanelMessage } from './state';
+import { startDependencyService } from './dependencyService';
+import { startLiveTesting } from './liveTesting';
 
 /**
  * Start MCP server

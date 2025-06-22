@@ -17,7 +17,11 @@ export let state: ExtensionState = {
     liveTestingEnabled: false,
     liveTestSocket: null,
     liveTestProcess: null,
-    
+
+    // Dependency service state
+    dependencyServiceEnabled: false,
+    dependencyServiceProcess: null,
+
     // MCP server state
     mcpServerEnabled: false,
     mcpServerProcess: null,
@@ -34,6 +38,7 @@ export let state: ExtensionState = {
     diagnosticCollection: null as any,
     testProgressStatusBar: null as any,
     liveTestServerStatusBar: null as any,
+    dependencyServiceStatusBar: null as any,
     mcpServerStatusBar: null as any,
     serverStatusCheckInterval: undefined,
     documentChangeTimeout: undefined,

@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as WebSocket from 'ws';
+import { state } from './state';
 
 interface EnhancedDependency {
     id: string;
@@ -31,6 +32,11 @@ export class PyTestEmbedHoverProvider implements vscode.HoverProvider {
         position: vscode.Position,
         token: vscode.CancellationToken
     ): Promise<vscode.Hover | undefined> {
+
+        // Check if dependency service is running
+        if (!state.dependencyServiceEnabled) {
+            return undefined;
+        }
 
         // Get the word at the current position
         const wordRange = document.getWordRangeAtPosition(position);
@@ -186,7 +192,7 @@ export class PyTestEmbedHoverProvider implements vscode.HoverProvider {
     private async getDependencyInfo(filePath: string, elementName: string, lineNumber: number): Promise<DependencyInfo | null> {
         return new Promise((resolve, reject) => {
             // Connect to dedicated dependency service
-            const ws = new WebSocket('ws://localhost:8770');
+            const ws = new WebSocket('ws://localhost:8769');
 
             const timeout = setTimeout(() => {
                 ws.close();
@@ -245,7 +251,7 @@ export class PyTestEmbedHoverProvider implements vscode.HoverProvider {
     private async getDocumentationInfo(filePath: string, elementName: string): Promise<{documentation: string, sourceFile: string} | null> {
         // Always use dependency service for consistency
         return new Promise((resolve, reject) => {
-            const ws = new WebSocket('ws://localhost:8770');
+            const ws = new WebSocket('ws://localhost:8769');
 
             const timeout = setTimeout(() => {
                 ws.close();
@@ -427,7 +433,7 @@ export class PyTestEmbedHoverProvider implements vscode.HoverProvider {
 
             // Fallback to dependency service
             return new Promise((resolve, reject) => {
-                const ws = new WebSocket('ws://localhost:8770');
+                const ws = new WebSocket('ws://localhost:8769');
 
                 const timeout = setTimeout(() => {
                     ws.close();
@@ -523,8 +529,11 @@ export class PyTestEmbedHoverProvider implements vscode.HoverProvider {
                     depLocation = await this.findElementAcrossFiles(dep.name);
                 }
 
-                // Fallback to original location
-                depLocation = depLocation || {file_path: dep.file_path, line_number: dep.line_number};
+                // Fallback to original location, but try to find actual line number
+                if (!depLocation) {
+                    const actualLocation = await this.findElementAcrossFiles(dep.name);
+                    depLocation = actualLocation || {file_path: dep.file_path, line_number: dep.line_number};
+                }
 
                 const navigateUri = vscode.Uri.parse(`command:pytestembed.navigateToElement?${encodeURIComponent(JSON.stringify(depLocation))}`);
                 const navigateSplitUri = vscode.Uri.parse(`command:pytestembed.navigateToElementSplit?${encodeURIComponent(JSON.stringify(depLocation))}`);
@@ -560,8 +569,11 @@ export class PyTestEmbedHoverProvider implements vscode.HoverProvider {
                     depLocation = await this.findElementAcrossFiles(dep.name);
                 }
 
-                // Fallback to original location
-                depLocation = depLocation || {file_path: dep.file_path, line_number: dep.line_number};
+                // Fallback to original location, but try to find actual line number
+                if (!depLocation) {
+                    const actualLocation = await this.findElementAcrossFiles(dep.name);
+                    depLocation = actualLocation || {file_path: dep.file_path, line_number: dep.line_number};
+                }
 
                 const navigateUri = vscode.Uri.parse(`command:pytestembed.navigateToElement?${encodeURIComponent(JSON.stringify(depLocation))}`);
                 const navigateSplitUri = vscode.Uri.parse(`command:pytestembed.navigateToElementSplit?${encodeURIComponent(JSON.stringify(depLocation))}`);
