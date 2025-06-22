@@ -1,0 +1,91 @@
+# PyTestEmbed Ignore File
+# This file controls which files and directories the file watcher monitors
+# Patterns follow gitignore syntax
+
+# Common directories to ignore
+__pycache__/
+.git/
+.svn/
+.hg/
+.bzr/
+node_modules/
+.venv/
+venv/
+env/
+.env/
+
+# Build and distribution directories
+build/
+dist/
+*.egg-info/
+.tox/
+.coverage/
+htmlcov/
+.pytest_cache/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# PyTestEmbed temporary files
+.pytestembed_temp/
+
+# Log files
+*.log
+logs/
+
+# Compiled Python files
+*.pyc
+*.pyo
+*.pyd
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# VSCode extension development files (but keep compiled output)
+vscode-pytestembed/node_modules/
+vscode-pytestembed/src/
+vscode-pytestembed/*.vsix
+vscode-pytestembed/tsconfig.json
+vscode-pytestembed/package-lock.json
+
+# Test files and temporary scripts
+test_*.py
+quick_test.py
+simple_dependency_test.py
+test_enhanced_tooltips.py
+test_smart_testing_system.py
+vscode-extension-size-analysis.md
+
+# PyTestEmbed core development files (ignore everything except testProject)
+pytestembed/
+docs/
+examples/
+*.md
+*.txt
+*.json
+*.toml
+*.cfg
+*.ini
+*.yaml
+*.yml
+
+# Only watch the testProject directory where derp.py and fullTest.py are
+!testProject/
+!testProject/**
+
+# Example patterns for other projects:
+# !src/
+# !tests/
+# !my_project/

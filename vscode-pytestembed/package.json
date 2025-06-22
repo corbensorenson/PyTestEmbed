@@ -19,7 +19,12 @@
     "embedded",
     "unittest"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onLanguage:python",
+    "workspaceContains:**/*.py",
+    "onCommand:pytestembed.toggleLiveTesting",
+    "onStartupFinished"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "configuration": {

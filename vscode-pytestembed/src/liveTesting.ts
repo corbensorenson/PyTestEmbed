@@ -295,6 +295,33 @@ function handleLiveTestMessage(message: string) {
                 handleClearDependencyCache(data);
                 addPanelMessage(`Dependency cache cleared for: ${(data as any).data?.file_path}`, 'info');
                 break;
+
+            // New message types from Python-centric architecture
+            case 'test_discovery':
+                handleTestDiscoveryResponse(data);
+                addPanelMessage(`Test discovery for ${data.file_path}: ${data.tests?.length || 0} tests found`, 'info');
+                break;
+
+            case 'test_at_line':
+                handleTestAtLineResponse(data);
+                addPanelMessage(`Test at line ${(data.line_number || 0) + 1}: ${data.test ? 'found' : 'not found'}`, 'info');
+                break;
+
+            case 'test_context':
+                handleTestContextResponse(data);
+                addPanelMessage(`Test context extracted for line ${(data.line_number || 0) + 1}`, 'info');
+                break;
+
+            case 'individual_test_start':
+                handleIndividualTestStart(data);
+                addPanelMessage(`Individual test started: ${data.test?.expression || 'unknown'}`, 'info');
+                break;
+
+            case 'individual_test_result':
+                handleIndividualTestResult(data);
+                addPanelMessage(`Individual test completed: ${data.result?.status || 'unknown'}`, 'info');
+                break;
+
             default:
                 addPanelMessage(`Unknown message type: ${data.type}`, 'warning');
         }
@@ -359,30 +386,42 @@ function handleTestResults(results: any) {
  * Handle individual test result
  */
 function handleIndividualTestResult(data: LiveTestMessage) {
-    let filePath = data.file_path!;
-    const lineNumber = data.line_number! - 1; // Convert to 0-based
-    const status = data.status!;
-    const expression = data.expression!;
-    const message = data.message;
+    // Handle both old and new message formats
+    const file_path = data.file_path;
+    const line_number = data.line_number;
+    const test = data.test;
+    const result = data.result;
 
-    // Convert relative path to absolute path if needed
-    if (!require('path').isAbsolute(filePath)) {
-        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-        if (workspaceFolder) {
-            filePath = require('path').join(workspaceFolder.uri.fsPath, filePath);
-        }
+    if (!file_path || line_number === undefined) {
+        console.warn('Invalid test result data:', data);
+        return;
     }
 
-    console.log(`🔄 Updating test status: ${filePath}:${lineNumber + 1} -> ${status}`);
+    // Convert relative path back to absolute
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    const absolutePath = workspaceFolder ?
+        require('path').join(workspaceFolder.uri.fsPath, file_path) :
+        file_path;
+
+    // Update test status based on result
+    const status = result?.status || data.status || 'fail';
+    const message = result?.error || result?.message || test?.message || data.message || '';
+    const expression = test?.expression || data.expression || 'Test';
+    const lineNumber = line_number - 1; // Convert to 0-based
+
+    console.log(`🔄 Updating test status: ${absolutePath}:${lineNumber + 1} -> ${status}`);
 
     // Update test status
-    updateTestStatus(filePath, lineNumber, status, expression, message);
+    updateTestStatus(absolutePath, lineNumber, status, expression, message);
 
     // Update progress
     state.currentTestProgress.current++;
     updateTestProgress(state.currentTestProgress.current, state.currentTestProgress.total);
 
     state.outputChannel.appendLine(`${status === 'pass' ? '✅' : '❌'} ${expression} - ${message || status}`);
+    if (result?.error) {
+        state.outputChannel.appendLine(`   Error: ${result.error}`);
+    }
 }
 
 /**
@@ -523,6 +562,7 @@ function updateLiveTestingStatus() {
 
 /**
  * Run an individual test at a specific line
+ * Simplified version - all logic moved to Python core
  */
 export function runIndividualTest(filePath: string, lineNumber: number) {
     const editor = vscode.window.activeTextEditor;
@@ -531,23 +571,12 @@ export function runIndividualTest(filePath: string, lineNumber: number) {
         return;
     }
 
-    const document = editor.document;
-    const line = document.lineAt(lineNumber);
-    const testExpression = extractTestExpression(line.text);
-
-    if (!testExpression) {
-        vscode.window.showErrorMessage('No valid test expression found on this line');
-        return;
-    }
-
-    // Update test status to running
-    updateTestStatus(filePath, lineNumber, 'running', testExpression);
+    // Update test status to running (visual feedback only)
+    updateTestStatus(filePath, lineNumber, 'running', 'Running test...');
     updateTestProgress(state.currentTestProgress.current, state.currentTestProgress.total + 1);
 
-    // Extract context (variables defined before this test)
-    const context = extractTestContext(document, lineNumber);
-
     // Send test execution request to live test server
+    // All test logic (expression extraction, context extraction, execution) handled by Python core
     if (state.liveTestSocket && state.liveTestSocket.readyState === WebSocket.OPEN) {
         // Convert absolute path to relative path for the server
         const workspaceFolder = vscode.workspace.getWorkspaceFolder(editor.document.uri);
@@ -556,66 +585,64 @@ export function runIndividualTest(filePath: string, lineNumber: number) {
             filePath;
 
         const testRequest = {
-            type: 'run_individual_test',
+            command: 'run_test_at_line',
             file_path: relativePath,
-            line_number: lineNumber + 1, // Convert back to 1-based for server
-            expression: testExpression,
-            context: context
+            line_number: lineNumber  // 0-based for Python core
         };
 
         state.liveTestSocket.send(JSON.stringify(testRequest));
-        state.outputChannel.appendLine(`🧪 Running individual test: ${testExpression} (${relativePath}:${lineNumber + 1})`);
+        state.outputChannel.appendLine(`🧪 Running individual test at line ${lineNumber + 1} (${relativePath})`);
         console.log(`📤 Sent individual test request:`, testRequest);
     } else {
         vscode.window.showErrorMessage('Live testing is not active. Please start live testing first.');
-        updateTestStatus(filePath, lineNumber, 'fail', testExpression, 'Live testing not active');
+        updateTestStatus(filePath, lineNumber, 'fail', 'Test failed', 'Live testing not active');
     }
+}
+
+// Test expression extraction and context extraction logic moved to Python core
+// VSCode extension now only handles UI and communication
+
+/**
+ * Handle test discovery response from Python core
+ */
+function handleTestDiscoveryResponse(data: any) {
+    // Import here to avoid circular dependency
+    const { handleTestDiscoveryResponse } = require('./testResults');
+    handleTestDiscoveryResponse(data);
 }
 
 /**
- * Extract test expression from a line of code
+ * Handle test at line response from Python core
  */
-function extractTestExpression(lineText: string): string | null {
-    // Match PyTestEmbed test syntax: expression == expected: "description"
-    // Handle both with and without trailing comma
-    const match = lineText.match(/^\s*(.+?)\s*:\s*".*?"[,]?\s*$/);
-    if (match) {
-        return match[1].trim();
-    }
-
-    // Debug: log what we're trying to match
-    console.log(`Failed to extract test expression from: "${lineText}"`);
-    console.log(`Trimmed: "${lineText.trim()}"`);
-
-    return null;
+function handleTestAtLineResponse(data: any) {
+    console.log(`Test at line ${data.line_number + 1}:`, data.test);
+    // Could be used for hover information or other IDE features
 }
 
 /**
- * Extract context code needed to run a test (variables defined before)
+ * Handle test context response from Python core
  */
-function extractTestContext(document: vscode.TextDocument, testLineNumber: number): string {
-    const contextLines: string[] = [];
-
-    // Find the start of the test block
-    let blockStartLine = testLineNumber;
-    for (let i = testLineNumber; i >= 0; i--) {
-        const line = document.lineAt(i);
-        if (line.text.trim() === 'test:') {
-            blockStartLine = i;
-            break;
-        }
-    }
-
-    // Collect all lines between test: and the current test line
-    for (let i = blockStartLine + 1; i < testLineNumber; i++) {
-        const line = document.lineAt(i);
-        const trimmedText = line.text.trim();
-
-        // Skip empty lines and test expressions
-        if (trimmedText && !trimmedText.match(/^.+:\s*".*"[,]?$/)) {
-            contextLines.push(line.text);
-        }
-    }
-
-    return contextLines.join('\n');
+function handleTestContextResponse(data: any) {
+    console.log(`Test context for line ${data.line_number + 1}:`, data.context);
+    // Could be used for debugging or test execution features
 }
+
+/**
+ * Handle individual test start notification
+ */
+function handleIndividualTestStart(data: any) {
+    const { file_path, line_number, test } = data;
+
+    // Convert relative path back to absolute
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    const absolutePath = workspaceFolder ?
+        require('path').join(workspaceFolder.uri.fsPath, file_path) :
+        file_path;
+
+    // Update test status to running
+    updateTestStatus(absolutePath, line_number, 'running', test?.expression || 'Running test...');
+
+    state.outputChannel.appendLine(`🧪 Individual test started: ${test?.expression || 'unknown'} (${file_path}:${line_number + 1})`);
+}
+
+// Duplicate function removed - using the first implementation above

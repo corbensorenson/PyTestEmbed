@@ -594,3 +594,185 @@ class PyTestEmbedParser:
                 break
         
         return indent
+
+    def extract_test_expression_from_line(self, line_text: str) -> Optional[str]:
+        """
+        Extract test expression from a line of code.
+        This replaces the VSCode extension's extractTestExpression function.
+
+        Args:
+            line_text: The line of code to parse
+
+        Returns:
+            The test expression if found, None otherwise
+        """
+        line = line_text.strip()
+
+        # Check for PyTestEmbed test syntax: expression == expected: "description"
+        # Look for comparison operators followed by a colon and message
+        comparison_operators = ['==', '!=', '<', '>', '<=', '>=', ' in ', ' not in ', ' is ', ' is not ']
+        has_comparison = any(op in line for op in comparison_operators)
+
+        if has_comparison and ':' in line:
+            # Split on the first colon to separate assertion from message
+            parts = line.split(':', 1)
+            if len(parts) == 2:
+                assertion_part = parts[0].strip()
+                message_part = parts[1].strip()
+
+                # Verify the message part looks like a quoted string
+                if (message_part.startswith('"') and message_part.rstrip(',').endswith('"')) or \
+                   (message_part.startswith("'") and message_part.rstrip(',').endswith("'")):
+                    return assertion_part
+
+        return None
+
+    def discover_all_tests_in_file(self, file_path: str) -> List[Dict]:
+        """
+        Discover all test expressions in a file with their metadata.
+        This provides comprehensive test discovery for IDE integration.
+
+        Args:
+            file_path: Path to the Python file to analyze
+
+        Returns:
+            List of test metadata dictionaries with keys:
+            - line_number: 0-based line number
+            - expression: The test expression
+            - message: The test description
+            - context: The context (function, class, global)
+            - parent_name: Name of parent function/class if applicable
+        """
+        try:
+            parsed_program = self.parse_file(file_path)
+            tests = []
+
+            # Collect tests from functions
+            for func in parsed_program.functions:
+                for test_block in func.test_blocks:
+                    for test_case in test_block.test_cases:
+                        tests.append({
+                            'line_number': test_case.line_number - 1,  # Convert to 0-based
+                            'expression': test_case.assertion,
+                            'message': test_case.message,
+                            'context': 'function',
+                            'parent_name': func.name,
+                            'statements': test_case.statements
+                        })
+
+            # Collect tests from class methods
+            for cls in parsed_program.classes:
+                for method in cls.methods:
+                    for test_block in method.test_blocks:
+                        for test_case in test_block.test_cases:
+                            tests.append({
+                                'line_number': test_case.line_number - 1,  # Convert to 0-based
+                                'expression': test_case.assertion,
+                                'message': test_case.message,
+                                'context': 'method',
+                                'parent_name': f"{cls.name}.{method.name}",
+                                'class_name': cls.name,
+                                'method_name': method.name,
+                                'statements': test_case.statements
+                            })
+
+                # Collect class-level tests
+                for test_block in cls.test_blocks:
+                    for test_case in test_block.test_cases:
+                        tests.append({
+                            'line_number': test_case.line_number - 1,  # Convert to 0-based
+                            'expression': test_case.assertion,
+                            'message': test_case.message,
+                            'context': 'class',
+                            'parent_name': cls.name,
+                            'class_name': cls.name,
+                            'statements': test_case.statements
+                        })
+
+            # Collect global tests
+            for test_block in parsed_program.global_test_blocks:
+                for test_case in test_block.test_cases:
+                    tests.append({
+                        'line_number': test_case.line_number - 1,  # Convert to 0-based
+                        'expression': test_case.assertion,
+                        'message': test_case.message,
+                        'context': 'global',
+                        'parent_name': None,
+                        'statements': test_case.statements
+                    })
+
+            return tests
+
+        except Exception as e:
+            print(f"Error discovering tests in {file_path}: {e}")
+            return []
+
+    def find_test_at_line(self, file_path: str, line_number: int) -> Optional[Dict]:
+        """
+        Find the test expression at a specific line number.
+
+        Args:
+            file_path: Path to the Python file
+            line_number: 0-based line number
+
+        Returns:
+            Test metadata dictionary if found, None otherwise
+        """
+        all_tests = self.discover_all_tests_in_file(file_path)
+
+        for test in all_tests:
+            if test['line_number'] == line_number:
+                return test
+
+        return None
+
+    def extract_test_context(self, file_path: str, line_number: int) -> str:
+        """
+        Extract context code needed to run a test (variables defined before).
+        This replaces the VSCode extension's extractTestContext function.
+
+        Args:
+            file_path: Path to the Python file
+            line_number: 0-based line number of the test
+
+        Returns:
+            Context code as a string
+        """
+        try:
+            with open(file_path, 'r') as f:
+                lines = f.readlines()
+
+            if line_number >= len(lines):
+                return ""
+
+            # Find the start of the test block
+            block_start_line = line_number
+            for i in range(line_number, -1, -1):
+                if i < len(lines) and lines[i].strip() == 'test:':
+                    block_start_line = i
+                    break
+
+            # Collect all lines between test: and the current test line
+            context_lines = []
+            for i in range(block_start_line + 1, line_number):
+                if i < len(lines):
+                    line_text = lines[i]
+                    trimmed_text = line_text.strip()
+
+                    # Skip empty lines and test expressions (lines that look like assertions)
+                    # Test expressions match pattern: expression: "description"
+                    if trimmed_text and not self._is_test_assertion_line(trimmed_text):
+                        context_lines.append(line_text.rstrip())
+
+            return '\n'.join(context_lines)
+
+        except Exception as e:
+            print(f"Error extracting test context from {file_path}:{line_number}: {e}")
+            return ""
+
+    def _is_test_assertion_line(self, line: str) -> bool:
+        """Check if a line is a test assertion (expression: "description")."""
+        # Look for pattern: something: "description" with optional comma
+        import re
+        pattern = r'^.+:\s*["\'].*["\'][,]?$'
+        return bool(re.match(pattern, line.strip()))

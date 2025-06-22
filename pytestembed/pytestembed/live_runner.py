@@ -25,6 +25,9 @@ from .smart_test_selection import SmartTestSelector
 from .failure_prediction import FailurePredictor
 from .property_testing import PropertyBasedTester
 from .dependency_graph import CodeDependencyGraph
+from .smart_test_selector import SmartTestSelector as NewSmartTestSelector
+from .change_detector import ChangeDetector
+from .test_result_cache import TestResultCache, CachedTestResult, TestRunSummary
 
 
 @dataclass
@@ -77,6 +80,14 @@ class LiveTestRunner:
         self.failure_predictor = FailurePredictor(str(workspace_path))
         self.property_tester = PropertyBasedTester(str(workspace_path))
         self.smart_testing_enabled = True
+
+        # New smart testing components
+        self.new_smart_selector = NewSmartTestSelector(str(workspace_path))
+        self.change_detector = ChangeDetector(str(workspace_path))
+        self.test_cache = TestResultCache(str(workspace_path))
+
+        # Track current run ID for test caching
+        self.current_run_id = None
 
         # Garbage collection settings
         self.temp_cleanup_interval = 300  # 5 minutes
@@ -209,7 +220,7 @@ class LiveTestRunner:
             print(f"⚠️ Error listening to File Watcher Service: {e}")
 
     async def handle_file_change_notification(self, change_data: dict):
-        """Handle file change notifications from the file watcher service."""
+        """Handle file change notifications from the file watcher service using smart test selection."""
         relative_path = change_data.get('relative_path')
         is_python_file = change_data.get('is_python_file', False)
 
@@ -218,18 +229,44 @@ class LiveTestRunner:
 
         print(f"📝 Handling file change notification: {relative_path}")
 
-        # Request dependency analysis from dependency service
-        if self.dependency_service_ws:
-            try:
-                await self.dependency_service_ws.send(json.dumps({
-                    'command': 'analyze_file_change',
-                    'file_path': relative_path
-                }))
-            except Exception as e:
-                print(f"⚠️ Failed to request dependency analysis: {e}")
+        # Use smart test selection to determine what tests to run
+        try:
+            full_path = str(self.workspace_path / relative_path)
 
-        # Run intelligent tests for the changed file
-        await self.run_intelligent_tests(relative_path)
+            # Get smart test selection based on changes
+            selection = await self.new_smart_selector.select_tests_for_changes(
+                [full_path], self.dependency_service_ws
+            )
+
+            print(f"🧠 Smart test selection: {len(selection.tests_to_run)} tests selected")
+            print(f"   Reason: {selection.selection_reason}")
+            print(f"   Time saved: {selection.estimated_time_saved:.1f}s")
+
+            # Generate new run ID for this test session
+            self.current_run_id = f"run_{int(time.time() * 1000)}"
+
+            # Broadcast smart selection info
+            await self.broadcast({
+                'type': 'smart_test_selection',
+                'data': {
+                    'tests_selected': len(selection.tests_to_run),
+                    'total_tests': selection.total_tests_found,
+                    'time_saved': selection.estimated_time_saved,
+                    'reason': selection.selection_reason,
+                    'run_id': self.current_run_id
+                }
+            })
+
+            # Run the selected tests
+            if selection.tests_to_run:
+                await self.run_selected_tests(selection.tests_to_run)
+            else:
+                print("📊 No tests need to be run based on changes")
+
+        except Exception as e:
+            print(f"⚠️ Error in smart test selection: {e}")
+            # Fallback to running all tests in the changed file
+            await self.run_intelligent_tests(relative_path)
 
     async def start_server(self):
         """Start the WebSocket server for IDE communication."""
@@ -257,6 +294,9 @@ class LiveTestRunner:
         
         self.server = await websockets.serve(handle_client, "localhost", self.port)
         print(f"✅ Live server running at ws://localhost:{self.port}")
+
+        # Run initial tests on startup
+        await self.run_initial_tests()
         
     async def handle_message(self, websocket, message: str):
         """Handle messages from IDE clients."""
@@ -338,6 +378,46 @@ class LiveTestRunner:
 
             elif command == 'get_failing_tests':
                 await self.send_failing_tests(websocket)
+
+            elif command == 'discover_tests':
+                file_path = data.get('file_path')
+                if file_path:
+                    await self.send_test_discovery(websocket, file_path)
+
+            elif command == 'find_test_at_line':
+                file_path = data.get('file_path')
+                line_number = data.get('line_number')
+                if file_path and line_number is not None:
+                    await self.send_test_at_line(websocket, file_path, line_number)
+
+            elif command == 'run_test_at_line':
+                file_path = data.get('file_path')
+                line_number = data.get('line_number')
+                if file_path and line_number is not None:
+                    await self.run_test_at_line(file_path, line_number)
+
+            elif command == 'extract_test_context':
+                file_path = data.get('file_path')
+                line_number = data.get('line_number')
+                if file_path and line_number is not None:
+                    await self.send_test_context(websocket, file_path, line_number)
+
+            elif command == 'get_cached_results':
+                await self.send_cached_results(websocket)
+
+            elif command == 'get_test_history':
+                file_path = data.get('file_path')
+                line_number = data.get('line_number')
+                days = data.get('days', 7)
+                if file_path and line_number is not None:
+                    await self.send_test_history(websocket, file_path, line_number, days)
+
+            elif command == 'get_test_trends':
+                days = data.get('days', 30)
+                await self.send_test_trends(websocket, days)
+
+            elif command == 'get_cache_stats':
+                await self.send_cache_stats(websocket)
 
             elif command == 'export_dependency_graph':
                 output_path = data.get('output_path', 'dependency_graph.json')
@@ -433,6 +513,9 @@ class LiveTestRunner:
                                     file_path, item, test_case, i
                                 )
                             test_results.append(result)
+
+                            # Store result in cache
+                            await self.store_test_result_in_cache(result)
 
                             # Broadcast individual test status update
                             await self.broadcast({
@@ -1549,6 +1632,136 @@ except Exception as e:
             }
             await websocket.send(json.dumps(error_response))
 
+    async def send_test_discovery(self, websocket, file_path: str):
+        """Send comprehensive test discovery results for a file."""
+        try:
+            # Convert relative path to absolute
+            if not Path(file_path).is_absolute():
+                full_path = str(self.workspace_path / file_path)
+            else:
+                full_path = file_path
+
+            # Discover all tests in the file
+            tests = self.parser.discover_all_tests_in_file(full_path)
+
+            await websocket.send(json.dumps({
+                'type': 'test_discovery',
+                'file_path': file_path,
+                'tests': tests,
+                'timestamp': time.time()
+            }))
+
+        except Exception as e:
+            await websocket.send(json.dumps({
+                'type': 'error',
+                'message': f'Error discovering tests in {file_path}: {str(e)}'
+            }))
+
+    async def send_test_at_line(self, websocket, file_path: str, line_number: int):
+        """Send test information for a specific line."""
+        try:
+            # Convert relative path to absolute
+            if not Path(file_path).is_absolute():
+                full_path = str(self.workspace_path / file_path)
+            else:
+                full_path = file_path
+
+            # Find test at the specified line
+            test = self.parser.find_test_at_line(full_path, line_number)
+
+            await websocket.send(json.dumps({
+                'type': 'test_at_line',
+                'file_path': file_path,
+                'line_number': line_number,
+                'test': test,
+                'timestamp': time.time()
+            }))
+
+        except Exception as e:
+            await websocket.send(json.dumps({
+                'type': 'error',
+                'message': f'Error finding test at line {line_number} in {file_path}: {str(e)}'
+            }))
+
+    async def send_test_context(self, websocket, file_path: str, line_number: int):
+        """Send test context for a specific line."""
+        try:
+            # Convert relative path to absolute
+            if not Path(file_path).is_absolute():
+                full_path = str(self.workspace_path / file_path)
+            else:
+                full_path = file_path
+
+            # Extract test context
+            context = self.parser.extract_test_context(full_path, line_number)
+
+            await websocket.send(json.dumps({
+                'type': 'test_context',
+                'file_path': file_path,
+                'line_number': line_number,
+                'context': context,
+                'timestamp': time.time()
+            }))
+
+        except Exception as e:
+            await websocket.send(json.dumps({
+                'type': 'error',
+                'message': f'Error extracting test context at line {line_number} in {file_path}: {str(e)}'
+            }))
+
+    async def run_test_at_line(self, file_path: str, line_number: int):
+        """Run a specific test at a given line number."""
+        try:
+            # Convert relative path to absolute
+            if not Path(file_path).is_absolute():
+                full_path = str(self.workspace_path / file_path)
+            else:
+                full_path = file_path
+
+            # Find the test at the specified line
+            test = self.parser.find_test_at_line(full_path, line_number)
+
+            if not test:
+                await self.broadcast({
+                    'type': 'error',
+                    'message': f'No test found at line {line_number + 1} in {file_path}'
+                })
+                return
+
+            print(f"🎯 Running individual test at line {line_number + 1}: {test['expression']}")
+
+            # Broadcast test start
+            await self.broadcast({
+                'type': 'individual_test_start',
+                'file_path': file_path,
+                'line_number': line_number,
+                'test': test,
+                'timestamp': time.time()
+            })
+
+            # Create a temporary test file with just this test
+            temp_test_content = self._create_individual_test_content(test, full_path)
+
+            # Run the individual test
+            result = await self._run_individual_test(temp_test_content, test, file_path, line_number)
+
+            # Broadcast the result
+            await self.broadcast({
+                'type': 'individual_test_result',
+                'file_path': file_path,
+                'line_number': line_number,
+                'test': test,
+                'result': result,
+                'timestamp': time.time()
+            })
+
+        except Exception as e:
+            print(f"⚠️ Error running test at line {line_number + 1}: {e}")
+            await self.broadcast({
+                'type': 'error',
+                'message': f'Error running test at line {line_number + 1} in {file_path}: {str(e)}'
+            })
+
     async def send_coverage(self, websocket, file_path: str):
         """Send coverage information for a file."""
         if file_path in self.file_results:
@@ -1612,6 +1825,360 @@ except Exception as e:
                 i += 1
 
         return '\n'.join(clean_lines)
+
+    def _create_individual_test_content(self, test: dict, original_file_path: str) -> str:
+        """Create test content for running an individual test."""
+        # Read the original file to get imports and context
+        try:
+            with open(original_file_path, 'r') as f:
+                original_content = f.read()
+        except Exception:
+            original_content = ""
+
+        # Extract imports and class/function definitions needed for the test
+        lines = original_content.split('\n')
+        imports = []
+        context_lines = []
+
+        # Collect imports
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith('import ') or stripped.startswith('from '):
+                imports.append(line)
+
+        # If test is in a class or function, we need that context
+        if test.get('context') in ['method', 'class']:
+            class_name = test.get('class_name')
+            if class_name:
+                # Find and include the class definition
+                in_class = False
+                class_indent = None
+                for line in lines:
+                    if line.strip().startswith(f'class {class_name}'):
+                        in_class = True
+                        class_indent = len(line) - len(line.lstrip())
+                        context_lines.append(line)
+                    elif in_class:
+                        current_indent = len(line) - len(line.lstrip())
+                        if line.strip() and current_indent <= class_indent:
+                            break
+                        context_lines.append(line)
+
+        elif test.get('context') == 'function':
+            parent_name = test.get('parent_name')
+            if parent_name:
+                # Find and include the function definition
+                in_function = False
+                func_indent = None
+                for line in lines:
+                    if line.strip().startswith(f'def {parent_name}'):
+                        in_function = True
+                        func_indent = len(line) - len(line.lstrip())
+                        context_lines.append(line)
+                    elif in_function:
+                        current_indent = len(line) - len(line.lstrip())
+                        if line.strip() and current_indent <= func_indent:
+                            break
+                        context_lines.append(line)
+
+        # Build the test content
+        test_content = '\n'.join(imports) + '\n\n'
+        if context_lines:
+            test_content += '\n'.join(context_lines) + '\n\n'
+
+        # Add the individual test
+        statements = test.get('statements', [])
+        if statements:
+            for stmt in statements:
+                test_content += f"    {stmt}\n"
+
+        test_content += f"    assert {test['expression']}, {test['message']}\n"
+
+        return test_content
+
+    async def _run_individual_test(self, test_content: str, test: dict, file_path: str, line_number: int) -> dict:
+        """Run an individual test and return the result."""
+        try:
+            # Create a temporary file for the test
+            temp_dir = self.workspace_path / '.pytestembed_temp'
+            temp_dir.mkdir(exist_ok=True)
+
+            temp_file = temp_dir / f'individual_test_{line_number}.py'
+
+            with open(temp_file, 'w') as f:
+                f.write(test_content)
+
+            # Run the test using the test runner
+            start_time = time.time()
+
+            # Execute the test file
+            import subprocess
+            import sys
+
+            result = subprocess.run(
+                [sys.executable, str(temp_file)],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+
+            duration = time.time() - start_time
+
+            # Clean up
+            temp_file.unlink()
+
+            # Determine test result
+            if result.returncode == 0:
+                return {
+                    'status': 'pass',
+                    'message': test.get('message', ''),
+                    'duration': duration,
+                    'output': result.stdout
+                }
+            else:
+                return {
+                    'status': 'fail',
+                    'message': test.get('message', ''),
+                    'duration': duration,
+                    'error': result.stderr,
+                    'output': result.stdout
+                }
+
+        except Exception as e:
+            return {
+                'status': 'error',
+                'message': test.get('message', ''),
+                'duration': 0,
+                'error': str(e)
+            }
+
+    async def run_initial_tests(self):
+        """Run all tests on startup and cache results."""
+        print("🚀 Running initial test suite...")
+
+        # Generate run ID for initial tests
+        self.current_run_id = f"initial_run_{int(time.time() * 1000)}"
+
+        start_time = time.time()
+        total_tests = 0
+        passed = 0
+        failed = 0
+        errors = 0
+
+        try:
+            # Find all Python files in workspace
+            python_files = []
+            for py_file in self.workspace_path.rglob('*.py'):
+                if '.pytestembed_temp' not in str(py_file):
+                    python_files.append(str(py_file))
+
+            print(f"📁 Found {len(python_files)} Python files")
+
+            # Run tests for each file
+            for file_path in python_files:
+                try:
+                    await self.run_file_tests(file_path)
+
+                    # Update counters from cached results
+                    if file_path in self.file_results:
+                        file_result = self.file_results[file_path]
+                        for test in file_result.tests:
+                            total_tests += 1
+                            if test.status == 'pass':
+                                passed += 1
+                            elif test.status == 'fail':
+                                failed += 1
+                            elif test.status == 'error':
+                                errors += 1
+
+                except Exception as e:
+                    print(f"⚠️ Error running tests in {file_path}: {e}")
+                    errors += 1
+
+            duration = time.time() - start_time
+
+            # Store run summary
+            summary = TestRunSummary(
+                run_id=self.current_run_id,
+                timestamp=time.time(),
+                total_tests=total_tests,
+                passed=passed,
+                failed=failed,
+                errors=errors,
+                skipped=0,
+                duration=duration,
+                trigger_reason="Initial startup test run"
+            )
+
+            self.test_cache.store_test_run_summary(summary)
+
+            # Broadcast initial test completion
+            await self.broadcast({
+                'type': 'initial_tests_complete',
+                'data': {
+                    'total_tests': total_tests,
+                    'passed': passed,
+                    'failed': failed,
+                    'errors': errors,
+                    'duration': duration,
+                    'run_id': self.current_run_id
+                }
+            })
+
+            print(f"✅ Initial tests complete: {passed}/{total_tests} passed in {duration:.1f}s")
+
+        except Exception as e:
+            print(f"⚠️ Error in initial test run: {e}")
+
+    async def run_selected_tests(self, tests_to_run):
+        """Run a specific set of selected tests."""
+        print(f"🎯 Running {len(tests_to_run)} selected tests...")
+
+        start_time = time.time()
+        results_by_file = {}
+
+        # Group tests by file
+        for test in tests_to_run:
+            if test.file_path not in results_by_file:
+                results_by_file[test.file_path] = []
+            results_by_file[test.file_path].append(test)
+
+        # Run tests file by file
+        for file_path, file_tests in results_by_file.items():
+            try:
+                full_path = str(self.workspace_path / file_path)
+
+                # For now, run all tests in the file if any test in that file is selected
+                # TODO: Implement more granular test execution
+                await self.run_file_tests(full_path)
+
+            except Exception as e:
+                print(f"⚠️ Error running selected tests in {file_path}: {e}")
+
+        duration = time.time() - start_time
+        print(f"✅ Selected tests completed in {duration:.1f}s")
+
+    async def store_test_result_in_cache(self, test_result: TestResult):
+        """Store a test result in the cache."""
+        if not self.current_run_id:
+            self.current_run_id = f"run_{int(time.time() * 1000)}"
+
+        # Convert to cached test result
+        cached_result = CachedTestResult(
+            file_path=test_result.file_path,
+            test_name=test_result.test_name,
+            line_number=test_result.line_number,
+            status=test_result.status,
+            message=test_result.message,
+            assertion=test_result.assertion,
+            duration=test_result.duration,
+            timestamp=time.time(),
+            run_id=self.current_run_id,
+            error_details=getattr(test_result, 'error_details', None)
+        )
+
+        self.test_cache.store_test_result(cached_result)
+
+    async def send_cached_results(self, websocket):
+        """Send all cached test results to client."""
+        try:
+            all_results = self.test_cache.get_all_results()
+
+            await websocket.send(json.dumps({
+                'type': 'cached_results',
+                'data': {
+                    'results_by_file': {
+                        file_path: [
+                            {
+                                'test_name': result.test_name,
+                                'line_number': result.line_number,
+                                'status': result.status,
+                                'message': result.message,
+                                'assertion': result.assertion,
+                                'duration': result.duration,
+                                'timestamp': result.timestamp
+                            }
+                            for result in results
+                        ]
+                        for file_path, results in all_results.items()
+                    },
+                    'timestamp': time.time()
+                }
+            }))
+
+        except Exception as e:
+            await websocket.send(json.dumps({
+                'type': 'error',
+                'message': f'Error getting cached results: {str(e)}'
+            }))
+
+    async def send_test_history(self, websocket, file_path: str, line_number: int, days: int):
+        """Send test history for a specific test."""
+        try:
+            # Convert relative path to absolute if needed
+            if not Path(file_path).is_absolute():
+                full_path = str(self.workspace_path / file_path)
+            else:
+                full_path = file_path
+
+            history = self.test_cache.get_test_history(full_path, line_number, days)
+
+            await websocket.send(json.dumps({
+                'type': 'test_history',
+                'data': {
+                    'file_path': file_path,
+                    'line_number': line_number,
+                    'days': days,
+                    'history': [
+                        {
+                            'status': result.status,
+                            'message': result.message,
+                            'duration': result.duration,
+                            'timestamp': result.timestamp,
+                            'run_id': result.run_id
+                        }
+                        for result in history
+                    ]
+                }
+            }))
+
+        except Exception as e:
+            await websocket.send(json.dumps({
+                'type': 'error',
+                'message': f'Error getting test history: {str(e)}'
+            }))
+
+    async def send_test_trends(self, websocket, days: int):
+        """Send test trends analysis."""
+        try:
+            trends = self.test_cache.get_test_trends(days)
+
+            await websocket.send(json.dumps({
+                'type': 'test_trends',
+                'data': trends
+            }))
+
+        except Exception as e:
+            await websocket.send(json.dumps({
+                'type': 'error',
+                'message': f'Error getting test trends: {str(e)}'
+            }))
+
+    async def send_cache_stats(self, websocket):
+        """Send cache statistics."""
+        try:
+            stats = self.test_cache.get_cache_stats()
+
+            await websocket.send(json.dumps({
+                'type': 'cache_stats',
+                'data': stats
+            }))
+
+        except Exception as e:
+            await websocket.send(json.dumps({
+                'type': 'error',
+                'message': f'Error getting cache stats: {str(e)}'
+            }))
 
     def _transform_statement_for_class_instance(self, statement: str, class_name: str, include_instance_creation: bool = True) -> str:
         """Transform a statement to use class instance context."""

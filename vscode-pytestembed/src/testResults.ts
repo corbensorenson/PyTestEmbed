@@ -185,14 +185,64 @@ export function clearAllProblems() {
 
 /**
  * Extract test expression from a line of code
+ * DEPRECATED: This logic has been moved to Python core.
+ * This function is kept for backward compatibility but should not be used for new features.
  */
 export function extractTestExpression(lineText: string): string | null {
-    // Match PyTestEmbed test syntax: expression == expected: "description"
+    // This is a simplified fallback - the Python core now handles all test parsing
     const match = lineText.match(/^\s*(.+?)\s*:\s*".*"[,]?$/);
     if (match) {
         return match[1].trim();
     }
     return null;
+}
+
+/**
+ * Request test discovery from Python core for a file
+ * This replaces local test parsing with server-side discovery
+ */
+export function requestTestDiscovery(filePath: string, callback: (tests: any[]) => void) {
+    const { state } = require('./extension');
+
+    if (state.liveTestSocket && state.liveTestSocket.readyState === WebSocket.OPEN) {
+        // Convert absolute path to relative path for the server
+        const workspaceFolder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(filePath));
+        const relativePath = workspaceFolder ?
+            require('path').relative(workspaceFolder.uri.fsPath, filePath) :
+            filePath;
+
+        const request = {
+            command: 'discover_tests',
+            file_path: relativePath
+        };
+
+        // Store callback for when response comes back
+        if (!state.testDiscoveryCallbacks) {
+            state.testDiscoveryCallbacks = new Map();
+        }
+        state.testDiscoveryCallbacks.set(relativePath, callback);
+
+        state.liveTestSocket.send(JSON.stringify(request));
+        console.log(`📤 Requested test discovery for: ${relativePath}`);
+    } else {
+        console.warn('Live test socket not available for test discovery');
+        callback([]);
+    }
+}
+
+/**
+ * Handle test discovery response from Python core
+ */
+export function handleTestDiscoveryResponse(data: any) {
+    const { state } = require('./extension');
+
+    if (data.type === 'test_discovery' && state.testDiscoveryCallbacks) {
+        const callback = state.testDiscoveryCallbacks.get(data.file_path);
+        if (callback) {
+            callback(data.tests || []);
+            state.testDiscoveryCallbacks.delete(data.file_path);
+        }
+    }
 }
 
 /**

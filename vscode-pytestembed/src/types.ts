@@ -83,6 +83,12 @@ export interface LiveTestMessage {
     status?: TestStatus;
     message?: string;
     error?: string;
+    // New message type properties
+    tests?: any[];
+    test?: any;
+    result?: any;
+    context?: string;
+    timestamp?: number;
 }
 
 // Panel message types

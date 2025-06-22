@@ -23,6 +23,7 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler, FileModifiedEvent, FileCreatedEvent, FileDeletedEvent
 import websockets
 import websockets.server
+from .ignore_patterns import PyTestEmbedIgnore
 
 
 @dataclass
@@ -54,16 +55,19 @@ class FileWatcherService:
         self.observer = None
         self.server = None
         self._loop = None
-        
+
         # Service registry
         self.registered_services: Dict[str, ServiceRegistration] = {}
         self.clients = set()
-        
+
         # File change tracking
         self.recent_changes: List[FileChangeEvent] = []
         self.max_recent_changes = 100
-        
-        # Skip patterns for files we don't want to watch
+
+        # PyTestEmbed ignore patterns
+        self.ignore_patterns = PyTestEmbedIgnore(str(workspace_path))
+
+        # Legacy skip patterns (now supplemented by .pytestembedignore)
         self.skip_patterns = [
             '__pycache__',
             '.git',
@@ -78,27 +82,31 @@ class FileWatcherService:
             '.DS_Store',
             'Thumbs.db'
         ]
-        
+
         # Files to skip for test execution (but still track for dependency updates)
         self.skip_test_files = [
             'quick_test.py',
-            'simple_dependency_test.py', 
+            'simple_dependency_test.py',
             'test_enhanced_tooltips.py'
         ]
     
     def _should_skip_file(self, file_path: Path) -> bool:
         """Check if a file should be skipped from watching."""
+        # First check .pytestembedignore patterns
+        if self.ignore_patterns.should_ignore(str(file_path)):
+            return True
+
         file_str = str(file_path)
-        
-        # Check skip patterns
+
+        # Check legacy skip patterns (for backward compatibility)
         for pattern in self.skip_patterns:
             if pattern in file_str:
                 return True
-        
+
         # Skip temporary files
         if file_path.name.startswith('.') and file_path.suffix in ['.tmp', '.swp', '.swo']:
             return True
-            
+
         return False
     
     def _is_python_file(self, file_path: Path) -> bool:
@@ -152,6 +160,10 @@ class FileWatcherService:
                 await self.handle_ping(websocket, data)
             elif command == 'get_registered_services':
                 await self.send_registered_services(websocket)
+            elif command == 'reload_ignore_patterns':
+                await self.reload_ignore_patterns(websocket)
+            elif command == 'get_ignore_stats':
+                await self.send_ignore_stats(websocket)
             else:
                 await websocket.send(json.dumps({
                     'type': 'error',
@@ -263,6 +275,45 @@ class FileWatcherService:
             'services': services,
             'timestamp': time.time()
         }))
+
+    async def reload_ignore_patterns(self, websocket):
+        """Reload .pytestembedignore patterns."""
+        try:
+            self.ignore_patterns.reload()
+            stats = self.ignore_patterns.get_stats()
+
+            await websocket.send(json.dumps({
+                'type': 'ignore_patterns_reloaded',
+                'stats': stats,
+                'timestamp': time.time()
+            }))
+
+            print(f"🔄 Reloaded .pytestembedignore: {stats['total_patterns']} patterns")
+
+        except Exception as e:
+            await websocket.send(json.dumps({
+                'type': 'error',
+                'message': f'Error reloading ignore patterns: {str(e)}'
+            }))
+
+    async def send_ignore_stats(self, websocket):
+        """Send ignore pattern statistics."""
+        try:
+            stats = self.ignore_patterns.get_stats()
+            watched_dirs = self.ignore_patterns.get_watched_directories()
+
+            await websocket.send(json.dumps({
+                'type': 'ignore_stats',
+                'stats': stats,
+                'watched_directories': watched_dirs,
+                'timestamp': time.time()
+            }))
+
+        except Exception as e:
+            await websocket.send(json.dumps({
+                'type': 'error',
+                'message': f'Error getting ignore stats: {str(e)}'
+            }))
 
     def start_file_watcher(self):
         """Start watching for file changes."""

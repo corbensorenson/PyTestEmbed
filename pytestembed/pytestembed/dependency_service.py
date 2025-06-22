@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 from typing import Dict, List, Optional
 from .dependency_graph import CodeDependencyGraph
+from .file_watcher import FileWatcherService, FileChangeEvent
 
 
 class DependencyService:
@@ -90,6 +91,22 @@ class DependencyService:
             )
         elif command == 'get_element_documentation':
             await self.send_element_documentation(
+                websocket,
+                data.get('file_path'),
+                data.get('element_name')
+            )
+        elif command == 'analyze_file_change':
+            await self.handle_analyze_file_change(
+                websocket,
+                data.get('file_path')
+            )
+        elif command == 'get_test_impact':
+            await self.handle_get_test_impact(
+                websocket,
+                data.get('file_path')
+            )
+        elif command == 'get_dependents':
+            await self.handle_get_dependents(
                 websocket,
                 data.get('file_path'),
                 data.get('element_name')
@@ -431,6 +448,91 @@ class DependencyService:
             # Path is not under workspace, return as-is
             print(f"⚠️ Could not make relative: {file_path} (workspace: {self.workspace_path.resolve()}) - {e}")
             return file_path
+
+    async def handle_analyze_file_change(self, websocket, file_path: str):
+        """Handle file change analysis request from live test service."""
+        try:
+            # Update dependency graph for the changed file
+            full_path = str(self.workspace_path / file_path)
+            self.dependency_graph.update_file_dependencies(full_path)
+
+            # Send confirmation back to the requesting service
+            await websocket.send(json.dumps({
+                'type': 'file_analysis_complete',
+                'file_path': file_path,
+                'timestamp': time.time()
+            }))
+
+            print(f"✅ Analyzed file change for {file_path}")
+
+        except Exception as e:
+            print(f"⚠️ Error analyzing file change for {file_path}: {e}")
+            await self.send_error(websocket, str(e))
+
+    async def handle_get_test_impact(self, websocket, file_path: str):
+        """Handle test impact analysis request from live test service."""
+        try:
+            # Get files that might be affected by changes to this file
+            impact_files = self.dependency_graph.get_test_impact(file_path)
+
+            # Send impact analysis back to the requesting service
+            await websocket.send(json.dumps({
+                'type': 'test_impact_analysis',
+                'changed_file': file_path,
+                'impact_files': impact_files,
+                'timestamp': time.time()
+            }))
+
+            print(f"✅ Sent test impact analysis for {file_path}: {len(impact_files)} files affected")
+
+        except Exception as e:
+            print(f"⚠️ Error getting test impact for {file_path}: {e}")
+            await self.send_error(websocket, str(e))
+
+    async def handle_get_dependents(self, websocket, file_path: str, element_name: str):
+        """Handle request for dependents of a specific element."""
+        try:
+            # Find the element
+            element_id = self._find_element_by_name(file_path, element_name)
+
+            if not element_id:
+                await websocket.send(json.dumps({
+                    'type': 'dependents',
+                    'file_path': file_path,
+                    'element_name': element_name,
+                    'dependents': [],
+                    'error': 'Element not found'
+                }))
+                return
+
+            # Get dependents
+            dependents = self.dependency_graph.get_dependents(element_id)
+
+            # Convert to detailed info
+            dependent_info = []
+            for dep_id in dependents:
+                if dep_id in self.dependency_graph.elements:
+                    element = self.dependency_graph.elements[dep_id]
+                    dependent_info.append({
+                        'file_path': element.file_path,
+                        'element_name': element.name,
+                        'element_type': element.element_type,
+                        'line_number': element.line_number
+                    })
+
+            await websocket.send(json.dumps({
+                'type': 'dependents',
+                'file_path': file_path,
+                'element_name': element_name,
+                'dependents': dependent_info,
+                'timestamp': time.time()
+            }))
+
+            print(f"✅ Sent dependents for {element_name}: {len(dependent_info)} dependents")
+
+        except Exception as e:
+            print(f"⚠️ Error getting dependents for {element_name}: {e}")
+            await self.send_error(websocket, str(e))
 
 
 async def main():

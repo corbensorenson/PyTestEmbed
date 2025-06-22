@@ -48,10 +48,15 @@ function startServerStatusChecks() {
 async function checkServerStatus() {
     // Check Live Test Server
     try {
+        // Create abort controller for timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2000);
+
         const response = await fetch('http://localhost:8765', {
             method: 'GET',
-            signal: AbortSignal.timeout(2000)
+            signal: controller.signal
         });
+        clearTimeout(timeoutId);
         updateLiveTestServerStatus(true);
     } catch (error) {
         updateLiveTestServerStatus(false);
@@ -59,10 +64,15 @@ async function checkServerStatus() {
 
     // Check MCP Server
     try {
+        // Create abort controller for timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2000);
+
         const response = await fetch('http://localhost:3001', {
             method: 'GET',
-            signal: AbortSignal.timeout(2000)
+            signal: controller.signal
         });
+        clearTimeout(timeoutId);
         updateMcpServerStatus(true);
     } catch (error) {
         updateMcpServerStatus(false);
